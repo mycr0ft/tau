@@ -52,7 +52,9 @@ class TauResourcePaths:
 
     By default Tau loads both Tau-native resources and `.agents` resources from
     the user home directory. When a cwd is provided, project-local `.tau` and
-    `.agents` resources are loaded automatically as well.
+    `.agents` resources are loaded automatically as well. When a profile root
+    is set, the profile's resources take precedence over the user-level
+    defaults (project resources still override the profile).
     """
 
     root: Path = field(default_factory=lambda: Path.home() / ".tau")
@@ -60,26 +62,44 @@ class TauResourcePaths:
     agents_root: Path | None = field(default_factory=lambda: Path.home() / ".agents")
     paths: TauPaths | None = None
     project_resources_enabled: bool = True
+    profile_root: Path | None = None
+    """Active profile directory, when a profile is selected."""
+
+    def _profile_or(self, default: Path, name: str) -> Path:
+        """Profile dir's ``name`` file when present, else the default."""
+        if self.profile_root is not None:
+            candidate = self.profile_root / name
+            if candidate.exists():
+                return candidate
+        return default
+
+    def _profile_dir_or(self, default: Path, name: str) -> Path:
+        """Profile dir's ``name`` directory when present, else the default."""
+        if self.profile_root is not None:
+            candidate = self.profile_root / name
+            if candidate.is_dir():
+                return candidate
+        return default
 
     @property
     def skills_dir(self) -> Path:
         """Return the primary Tau skills directory."""
-        return self.root / "skills"
+        return self._profile_dir_or(self.root / "skills", "skills")
 
     @property
     def prompts_dir(self) -> Path:
         """Return the primary Tau prompt templates directory."""
-        return self.root / "prompts"
+        return self._profile_dir_or(self.root / "prompts", "prompts")
 
     @property
     def system_prompt_path(self) -> Path:
         """Return the user-level replacement system-prompt file."""
-        return self.root / "SYSTEM.md"
+        return self._profile_or(self.root / "SYSTEM.md", "SYSTEM.md")
 
     @property
     def append_system_prompt_path(self) -> Path:
         """Return the user-level appended system-prompt file."""
-        return self.root / "APPEND_SYSTEM.md"
+        return self._profile_or(self.root / "APPEND_SYSTEM.md", "APPEND_SYSTEM.md")
 
     @property
     def skills_dirs(self) -> tuple[Path, ...]:
