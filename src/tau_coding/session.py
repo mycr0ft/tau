@@ -2317,6 +2317,54 @@ class CodingSession:
             list(self._harness.config.tools)
         )
 
+    async def switch_profile(self, name: str) -> str:
+        """Switch the active profile by re-staging resources, reload-style.
+
+        Binds the session's resource paths to the profile root first, then
+        runs the reload publication path so the rebuilt system prompt, skills,
+        and templates all come from the profile. Raises ``ValueError`` for
+        unknown profiles or while an agent turn is active.
+        """
+        from tau_coding.profiles import ProfileError, ProfileStore
+        from tau_coding.resources import resource_paths_with_profile
+
+        self._require_idle("switch profile")
+        try:
+            profile = ProfileStore(self._resource_paths.paths).get(name)
+        except ProfileError as exc:
+            raise ValueError(str(exc)) from exc
+
+        base_paths = self._config.resource_paths or TauResourcePaths(cwd=self._config.cwd)
+        new_paths = resource_paths_with_profile(
+            base_paths,
+            profile_root=profile.directory,
+        )
+        self._resource_paths = new_paths
+        self._config = replace(
+            self._config,
+            resource_paths=new_paths,
+            profile_name=profile.name,
+            tool_policy=profile.tools,
+        )
+        try:
+            await self.reload()
+        except BaseException:
+            # Roll the path/config swap back so a failed reload leaves the
+            # session exactly as it was.
+            self._resource_paths = base_paths
+            self._config = replace(
+                self._config,
+                resource_paths=base_paths,
+                profile_name=None,
+                tool_policy=None,
+            )
+            raise
+        self.apply_profile_tools()
+        self._learned_section = compose_learned_section(
+            snapshot_learned_context(self._resource_paths.paths)
+        )
+        return f"Switched to profile: {profile.name}"
+
     async def learn(self) -> CuratorRunResult:
         """Review the settled transcript and apply lessons to the durable stores.
 

@@ -211,6 +211,8 @@ def _discover_system_prompt_file(
     candidates: list[tuple[str, Path]] = []
     if paths.cwd is not None and paths.project_resources_enabled:
         candidates.append(("project", paths.cwd / ".tau" / filename))
+    if paths.profile_root is not None:
+        candidates.append(("profile", paths.profile_root / filename))
     candidates.append(("user", paths.root / filename))
 
     existing: list[tuple[str, Path]] = []
@@ -274,6 +276,8 @@ def _discover_append_system_prompt_files(
 ) -> tuple[tuple[str, ...], tuple[Path, ...]]:
     """Read every append file in broad-to-specific order."""
     candidates: list[tuple[str, Path]] = [("user", paths.root / "APPEND_SYSTEM.md")]
+    if paths.profile_root is not None:
+        candidates.append(("profile", paths.profile_root / "APPEND_SYSTEM.md"))
     if paths.cwd is not None and paths.project_resources_enabled:
         candidates.append(("project", paths.cwd / ".tau" / "APPEND_SYSTEM.md"))
 
@@ -330,6 +334,7 @@ def resource_paths_with_cwd(
         agents_root=paths.agents_root,
         paths=paths.paths,
         project_resources_enabled=paths.project_resources_enabled,
+        profile_root=paths.profile_root,
     )
 
 
@@ -345,6 +350,23 @@ def resource_paths_with_project_trust(
         agents_root=paths.agents_root,
         paths=paths.paths,
         project_resources_enabled=trusted,
+        profile_root=paths.profile_root,
+    )
+
+
+def resource_paths_with_profile(
+    paths: TauResourcePaths,
+    *,
+    profile_root: Path | None,
+) -> TauResourcePaths:
+    """Return the same plan bound to a different profile root (or none)."""
+    return TauResourcePaths(
+        root=paths.root,
+        cwd=paths.cwd,
+        agents_root=paths.agents_root,
+        paths=paths.paths,
+        project_resources_enabled=paths.project_resources_enabled,
+        profile_root=profile_root,
     )
 
 

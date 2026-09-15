@@ -626,10 +626,9 @@ def main(
             custom_system_prompt,
             resolved_append_system_prompt,
         )
-        profile_kwargs: dict[str, Any] = (
+        runner_kwargs: dict[str, Any] = (
             {"profile_root": profile_root} if profile_root is not None else {}
         )
-        runner_kwargs: dict[str, Any] = {"profile_root": profile_root} if profile_root is not None else {}
         if thinking_level_override is not None:
             runner_kwargs["thinking_level_override"] = thinking_level_override
         print_runner = (

@@ -106,6 +106,8 @@ from tau_coding.oauth_types import (
     OAuthPrompt,
     OAuthSelectPrompt,
 )
+from tau_coding.paths import TauPaths
+from tau_coding.profiles import ProfileStore
 from tau_coding.project_trust import ProjectTrustRequest, TrustChoice, TrustOverride
 from tau_coding.prompt_templates import PromptTemplate
 from tau_coding.provider_catalog import (
@@ -131,8 +133,6 @@ from tau_coding.provider_config import (
 )
 from tau_coding.provider_runtime import ClosableModelProvider, create_model_provider
 from tau_coding.resources import ResourceDiagnostic, TauResourcePaths
-from tau_coding.paths import TauPaths
-from tau_coding.profiles import ProfileStore
 from tau_coding.session import (
     TREE_RUNNING_MESSAGE,
     CodingSession,
@@ -4862,6 +4862,31 @@ class TauTuiApp(App[None]):
                         self._run_learning(),
                         exclusive=False,
                     )
+            if command.profile_requested:
+                names = self.session.list_profiles()
+                active = self.session.profile_name
+                lines = ["Available profiles:"]
+                lines.extend(f"- {name}" for name in names)
+                if len(lines) == 1:
+                    lines.append("(none — create ~/.tau/profiles/<name>/profile.json)")
+                marker = active or "(default)"
+                command = replace(command, message="\n".join(lines) + f"\nActive: {marker}")
+            if command.profile_switch_to is not None:
+                if self._is_agent_or_queue_active() or self._is_learning_active():
+                    self._notify(
+                        "Wait for the current operation to finish before switching profiles.",
+                        severity="warning",
+                    )
+                else:
+                    try:
+                        switch_message = await self.session.switch_profile(
+                            command.profile_switch_to
+                        )
+                    except ValueError as exc:
+                        command = replace(command, message=f"Could not switch profile: {exc}")
+                    else:
+                        command = replace(command, message=switch_message)
+                        self._reload_session_themes()
             if command.new_session_requested:
                 await self._new_session()
             if command.compact_summary is not None:
