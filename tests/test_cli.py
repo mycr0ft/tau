@@ -208,7 +208,7 @@ def test_unknown_user_prompt_path_is_forwarded_as_literal(
         return original_expanduser(path)
 
     async def fake_run_openai_tui(*args: object) -> None:
-        calls.append((args[-2], args[-1]))  # type: ignore[arg-type]
+        calls.append((args[-3], args[-2]))  # type: ignore[arg-type]
 
     monkeypatch.setattr(Path, "expanduser", fail_for_unknown_user)
     monkeypatch.setattr(cli, "_startup_update_notice", lambda: None)
@@ -329,7 +329,7 @@ def test_system_prompt_flags_forward_to_resumed_tui(
     calls: list[tuple[str | None, str | None, str | None]] = []
 
     async def fake_run_openai_tui(*args: object) -> None:
-        calls.append((args[2], args[-2], args[-1]))  # type: ignore[arg-type]
+        calls.append((args[2], args[-3], args[-2]))  # type: ignore[arg-type]
 
     monkeypatch.setattr(cli, "_startup_update_notice", lambda: None)
     monkeypatch.setattr(cli, "run_openai_tui", fake_run_openai_tui)
@@ -1068,6 +1068,7 @@ def test_print_mode_passes_exact_session_id_without_changing_output(
         session_id: str | None,
         custom_system_prompt: str | None,
         append_system_prompt: str | None,
+        profile_root: Path | None = None,
     ) -> bool:
         del (
             prompt,
@@ -1117,6 +1118,7 @@ def test_print_mode_passes_session_id_for_resume(monkeypatch: pytest.MonkeyPatch
         append_system_prompt: str | None,
         trust_override: object | None,
         resume_session_id: str | None,
+        profile_root: Path | None = None,
     ) -> bool:
         del (
             model,
@@ -1133,6 +1135,7 @@ def test_print_mode_passes_session_id_for_resume(monkeypatch: pytest.MonkeyPatch
             trust_override,
         )
         calls.append((prompt, resume_session_id))
+        _ = profile_root
         return True
 
     monkeypatch.setattr(cli, "_startup_update_notice", lambda: None)

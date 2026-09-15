@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from functools import partial
 from os import environ
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import anyio
 import typer
@@ -31,6 +31,8 @@ from tau_coding.models_dev_store import (
     ModelsDevRefreshResult,
     refresh_models_dev_catalog,
 )
+from tau_coding.paths import TauPaths
+from tau_coding.profiles import ProfileStore, ToolPolicy
 from tau_coding.project_trust import TrustDefault, TrustOverride
 from tau_coding.provider_config import (
     DEFAULT_MODEL,
@@ -297,6 +299,14 @@ def main(
         bool,
         typer.Option("--new-session", help="Create a new session in TUI mode (default)."),
     ] = False,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Select a named profile from ~/.tau/profiles/ (resources, "
+            "provider/model defaults, tool policy).",
+        ),
+    ] = None,
     session_id: Annotated[
         str | None,
         typer.Option(
@@ -516,6 +526,17 @@ def main(
     )
     resolved_append_system_prompt = _resolve_append_system_prompts(append_system_prompt or ())
 
+    profile_root: Path | None = None
+    profile_data: Any = None
+    if profile is not None:
+        from tau_coding.profiles import ProfileError, ProfileStore, ToolPolicy  # noqa: F401
+
+        try:
+            profile_data = ProfileStore().get(profile)
+        except ProfileError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        profile_root = profile_data.directory
+
     if rpc_requested:
         if initial_prompt is not None:
             raise typer.BadParameter(
@@ -561,6 +582,7 @@ def main(
                 project_extensions,
                 custom_system_prompt,
                 resolved_append_system_prompt,
+                profile_root,
             )
             tui_runner = (
                 partial(run_openai_tui, thinking_level_override=thinking_level_override)
@@ -568,9 +590,9 @@ def main(
                 else run_openai_tui
             )
             resumable_session_id = (
-                anyio.run(tui_runner, *tui_args)
+                anyio.run(tui_runner, *tui_args)  # type: ignore[arg-type]
                 if trust_override is None
-                else anyio.run(tui_runner, *tui_args, trust_override)
+                else anyio.run(tui_runner, *tui_args, trust_override)  # type: ignore[arg-type]
             )
         except (RuntimeError, ValueError) as exc:
             raise typer.BadParameter(str(exc)) from exc
@@ -604,9 +626,15 @@ def main(
             custom_system_prompt,
             resolved_append_system_prompt,
         )
+        profile_kwargs: dict[str, Any] = (
+            {"profile_root": profile_root} if profile_root is not None else {}
+        )
+        runner_kwargs: dict[str, Any] = {"profile_root": profile_root} if profile_root is not None else {}
+        if thinking_level_override is not None:
+            runner_kwargs["thinking_level_override"] = thinking_level_override
         print_runner = (
-            partial(run_openai_print_mode, thinking_level_override=thinking_level_override)
-            if thinking_level_override is not None
+            partial(run_openai_print_mode, **runner_kwargs)
+            if runner_kwargs
             else run_openai_print_mode
         )
         if session is not None:
@@ -638,6 +666,7 @@ async def run_openai_tui(
     custom_system_prompt: str | None = None,
     append_system_prompt: str | None = None,
     trust_override: TrustOverride | None = None,
+    profile_root: Path | None = None,
     *,
     thinking_level_override: ThinkingLevel | None = None,
 ) -> str | None:
@@ -661,6 +690,7 @@ async def run_openai_tui(
         append_system_prompt=append_system_prompt,
         trust_override=trust_override,
         thinking_level_override=thinking_level_override,
+        profile_root=profile_root,
     )
 
 
@@ -1043,12 +1073,16 @@ async def run_openai_print_mode(
     append_system_prompt: str | None = None,
     trust_override: TrustOverride | None = None,
     resume_session_id: str | None = None,
+    profile_root: Path | None = None,
     *,
     thinking_level_override: ThinkingLevel | None = None,
 ) -> bool:
     """Run a new or resumed print-mode turn using the configured provider."""
     settings = load_provider_settings()
     shell_settings = load_shell_settings()
+    active_profile = (
+        ProfileStore().get(Path(profile_root).name) if profile_root is not None else None
+    )
     manager = session_manager or SessionManager()
     record = _print_session_record(
         manager,
@@ -1146,6 +1180,17 @@ async def run_openai_print_mode(
             cwd=record.cwd,
             provider=initial_provider,
             output=output,
+            resource_paths=(
+                TauResourcePaths(
+                    root=TauPaths().home,
+                    agents_root=None,
+                    profile_root=profile_root,
+                )
+                if profile_root is not None
+                else None
+            ),
+            profile_name=active_profile.name if active_profile is not None else None,
+            tool_policy=active_profile.tools if active_profile is not None else None,
             storage=jsonl_session_storage(record.path),
             session_id=record.id,
             session_manager=manager,
@@ -1248,6 +1293,8 @@ async def run_print_mode(
     provider: ModelProvider | None,
     output: PrintOutputMode = PrintOutputMode.text,
     resource_paths: TauResourcePaths | None = None,
+    profile_name: str | None = None,
+    tool_policy: ToolPolicy | None = None,
     storage: SessionStorage | None = None,
     session_id: str | None = None,
     session_manager: SessionManager | None = None,
@@ -1283,6 +1330,8 @@ async def run_print_mode(
             cwd=cwd,
             storage=storage or _MemorySessionStorage(),
             resource_paths=resource_paths,
+            profile_name=profile_name,
+            tool_policy=tool_policy,
             session_id=session_id,
             session_manager=session_manager,
             provider_name=provider_name,

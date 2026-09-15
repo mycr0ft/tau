@@ -135,6 +135,7 @@ def test_registered_commands_are_pi_aligned(tmp_path: Path) -> None:
         "model",
         "name",
         "new",
+        "profile",
         "prompts",
         "quit",
         "reload",

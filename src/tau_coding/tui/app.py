@@ -131,6 +131,8 @@ from tau_coding.provider_config import (
 )
 from tau_coding.provider_runtime import ClosableModelProvider, create_model_provider
 from tau_coding.resources import ResourceDiagnostic, TauResourcePaths
+from tau_coding.paths import TauPaths
+from tau_coding.profiles import ProfileStore
 from tau_coding.session import (
     TREE_RUNNING_MESSAGE,
     CodingSession,
@@ -8470,6 +8472,7 @@ async def run_tui_app(
     append_system_prompt: str | None = None,
     trust_override: TrustOverride | None = None,
     thinking_level_override: ThinkingLevel | None = None,
+    profile_root: Path | None = None,
 ) -> str | None:
     """Run the Textual app and return the active id when its session is persisted."""
     _configure_herdr_textual_mouse()
@@ -8592,6 +8595,20 @@ async def run_tui_app(
                 storage=jsonl_session_storage(record.path),
                 session_id=record.id,
                 session_manager=manager,
+                resource_paths=(
+                    TauResourcePaths(
+                        root=TauPaths().home,
+                        agents_root=None,
+                        profile_root=profile_root,
+                    )
+                    if profile_root is not None
+                    else None
+                ),
+                tool_policy=(
+                    ProfileStore().get(profile_root.name).tools
+                    if profile_root is not None
+                    else None
+                ),
                 provider_name=selected_provider_name,
                 inference_provider=inference_provider,
                 inference_provider_mode=inference_provider_mode,

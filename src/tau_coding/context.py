@@ -42,7 +42,11 @@ def discover_project_context_with_diagnostics(
 
 
 def _context_file_candidates(paths: TauResourcePaths) -> tuple[Path, ...]:
-    candidates: list[Path] = [paths.root / "AGENTS.md"]
+    candidates: list[Path] = []
+    # Profile AGENTS.md takes precedence over the user-level default.
+    if paths.profile_root is not None:
+        candidates.append(paths.profile_root / "AGENTS.md")
+    candidates.append(paths.root / "AGENTS.md")
     if paths.agents_root is not None:
         candidates.append(paths.agents_root / "AGENTS.md")
 

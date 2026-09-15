@@ -124,6 +124,8 @@ class CommandResult:
     local_requested: bool = False
     sidebar_toggle_requested: bool = False
     learn_requested: bool = False
+    profile_requested: bool = False
+    profile_switch_to: str | None = None
     login_provider: str | None = None
     login_method: str | None = None
     logout_picker_requested: bool = False
@@ -329,6 +331,15 @@ def create_default_command_registry() -> CommandRegistry:
             description="Review this session and save durable memory and lessons.",
             handler=_learn_command,
             search_terms=("memory", "curate", "lessons"),
+        )
+    )
+    registry.register(
+        SlashCommand(
+            name="profile",
+            usage="/profile [name]",
+            description="List profiles or switch the active profile.",
+            handler=_profile_command,
+            search_terms=("persona", "configuration", "switch"),
         )
     )
     registry.register(
@@ -591,6 +602,14 @@ def _learn_command(context: CommandContext) -> CommandResult:
     # Curation is an async provider call, so frontends execute it from their
     # async command path, mirroring /reload's flag-then-run pattern.
     return CommandResult(handled=True, learn_requested=True)
+
+
+def _profile_command(context: CommandContext) -> CommandResult:
+    # Switching rebuilds the session from profile resources (reload path).
+    args = context.args.strip()
+    if not args:
+        return CommandResult(handled=True, profile_requested=True)
+    return CommandResult(handled=True, profile_switch_to=args.split()[0])
 
 
 def _context_command(context: CommandContext) -> CommandResult:

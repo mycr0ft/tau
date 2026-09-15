@@ -94,6 +94,7 @@ from tau_coding.learning_curator import CuratorRunResult, curate_session
 from tau_coding.models_dev_store import ModelsDevRefreshResult, refresh_models_dev_catalog
 from tau_coding.oauth import account_id_from_access_token
 from tau_coding.paths import TauPaths
+from tau_coding.profiles import ToolPolicy
 from tau_coding.project_trust import (
     CanonicalProjectPath,
     ProjectTrustCoordinator,
@@ -354,6 +355,10 @@ class CodingSessionConfig:
     context_files: tuple[ProjectContextFile, ...] = ()
     tools: list[AgentTool] | None = None
     resource_paths: TauResourcePaths | None = None
+    profile_name: str | None = None
+    """Active profile name, when one is selected (display + tool policy)."""
+    tool_policy: ToolPolicy | None = None
+    """Allow/deny filter applied to the composed toolset (from a profile)."""
     session_id: str | None = None
     session_manager: SessionManager | None = None
     command_registry: CommandRegistry | None = None
@@ -711,6 +716,8 @@ class CodingSession:
             )
         )
         tools = extension_runtime.compose_tools(base_tools)
+        if config.tool_policy is not None:
+            tools = config.tool_policy.apply(tools)
         system = (
             config.system
             if config.system is not None
@@ -2290,6 +2297,25 @@ class CodingSession:
             self._model_limits_discovery_error = error
             if isinstance(provider, ModelCatalogProvider):
                 self._model_catalog_discovery_errors[self.provider_name] = error
+
+    def list_profiles(self) -> tuple[str, ...]:
+        """Profile names available under ``~/.tau/profiles/``."""
+        from tau_coding.profiles import ProfileStore
+
+        return ProfileStore(self._resource_paths.paths).list_profiles()
+
+    @property
+    def profile_name(self) -> str | None:
+        """Return the active profile name, or ``None`` for the default."""
+        return self._config.profile_name
+
+    def apply_profile_tools(self) -> None:
+        """Apply the active profile's tool policy to the harness toolset."""
+        if self._config.tool_policy is None:
+            return
+        self._harness.config.tools = self._config.tool_policy.apply(
+            list(self._harness.config.tools)
+        )
 
     async def learn(self) -> CuratorRunResult:
         """Review the settled transcript and apply lessons to the durable stores.
