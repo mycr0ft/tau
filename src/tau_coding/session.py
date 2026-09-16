@@ -9,7 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from os import environ
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from tau_agent.events import AgentEndEvent, AgentEvent, MessageEndEvent, ToolExecutionEndEvent
 from tau_agent.harness import AgentHarness, AgentHarnessConfig, QueuedMessages
@@ -2303,6 +2303,45 @@ class CodingSession:
         from tau_coding.profiles import ProfileStore
 
         return ProfileStore(self._resource_paths.paths).list_profiles()
+
+    def create_profile(
+        self,
+        name: str,
+        *,
+        clone_current: bool,
+    ) -> str:
+        """Create a profile, optionally cloning the live session settings.
+
+        Returns a human-readable summary of what was scaffolded.
+        Raises ``ValueError`` when the name is invalid or taken.
+        """
+        from tau_coding.profiles import ProfileError, ProfileStore
+
+        store = ProfileStore(self._resource_paths.paths)
+        store.ensure_profiles_dir()
+        values: dict[str, Any] = {"scaffold": True}
+        if clone_current:
+            values["provider"] = self._provider_name
+            values["model"] = self.model
+            values["thinking_level"] = str(self.thinking_level)
+            tool_names = [tool.name for tool in self.tools]
+            values["tools"] = {"allow": tool_names}
+            system_prompt = (
+                "Profile {name}\n\n"
+                "Cloned from the current session.\n\n"
+                "Persona and instructions:\n\n- (edit me)\n"
+            )
+        else:
+            system_prompt = "Profile {name}\n\nDescribe this profile's persona and instructions.\n"
+        values["system_prompt"] = system_prompt.format(name=name)
+        try:
+            profile = store.create(name, **values)
+        except ProfileError as exc:
+            raise ValueError(str(exc)) from exc
+        details = ["profile.json"]
+        if (profile.directory / "SYSTEM.md").exists():
+            details.append("SYSTEM.md")
+        return f"Created profile {name!r} ({', '.join(details)}) under {profile.directory}"
 
     @property
     def profile_name(self) -> str | None:

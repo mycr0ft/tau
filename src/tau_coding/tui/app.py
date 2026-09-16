@@ -4863,30 +4863,35 @@ class TauTuiApp(App[None]):
                         exclusive=False,
                     )
             if command.profile_requested:
-                names = self.session.list_profiles()
-                active = self.session.profile_name
-                lines = ["Available profiles:"]
-                lines.extend(f"- {name}" for name in names)
-                if len(lines) == 1:
-                    lines.append("(none — create ~/.tau/profiles/<name>/profile.json)")
-                marker = active or "(default)"
-                command = replace(command, message="\n".join(lines) + f"\nActive: {marker}")
+                command = replace(command, message=await self._handle_profile_listing())
             if command.profile_switch_to is not None:
-                if self._is_agent_or_queue_active() or self._is_learning_active():
-                    self._notify(
-                        "Wait for the current operation to finish before switching profiles.",
-                        severity="warning",
-                    )
-                else:
-                    try:
-                        switch_message = await self.session.switch_profile(
-                            command.profile_switch_to
+                names = self.session.list_profiles()
+                requested = command.profile_switch_to
+                if requested not in names:
+                    offered = await self._offer_profile_creation(requested)
+                    if offered is None:
+                        command = replace(
+                            command,
+                            message=(
+                                f"No profile {requested!r}. Use /profile to pick or create one."
+                            ),
                         )
-                    except ValueError as exc:
-                        command = replace(command, message=f"Could not switch profile: {exc}")
                     else:
-                        command = replace(command, message=switch_message)
-                        self._reload_session_themes()
+                        command = replace(command, message=offered)
+                else:
+                    if self._is_agent_or_queue_active() or self._is_learning_active():
+                        self._notify(
+                            "Wait for the current operation to finish before switching profiles.",
+                            severity="warning",
+                        )
+                    else:
+                        try:
+                            switch_message = await self.session.switch_profile(requested)
+                        except ValueError as exc:
+                            command = replace(command, message=f"Could not switch profile: {exc}")
+                        else:
+                            command = replace(command, message=switch_message)
+                            self._reload_session_themes()
             if command.new_session_requested:
                 await self._new_session()
             if command.compact_summary is not None:
@@ -7213,6 +7218,95 @@ class TauTuiApp(App[None]):
             self._notify(f"Could not switch model: {exc}", severity="error")
             return
         self._refresh_chrome()
+
+    async def _handle_profile_listing(self) -> str:
+        """Resolve `/profile` with no args: a switcher/creator modal."""
+        runtime = getattr(self.session, "extension_runtime", None)
+        ui = getattr(runtime, "ui", None)
+        if ui is None or not getattr(ui, "has_ui", False):
+            names = self.session.list_profiles()
+            active = self.session.profile_name
+            lines = ["Available profiles:"]
+            lines.extend(f"- {name}" for name in names)
+            if len(lines) == 1:
+                lines.append("(none — /profile will offer to create one)")
+            marker = active or "(default)"
+            return "\n".join(lines) + f"\nActive: {marker}"
+        names = self.session.list_profiles()
+        active = self.session.profile_name
+        options = [f"switch: {name}" for name in names]
+        options.append("create: new profile")
+        choice = await ui.select(
+            "Profiles" + (f"  (active: {active})" if active else "  (no profile active)"),
+            options,
+        )
+        if choice is None:
+            return "Profile picker dismissed."
+        if choice.startswith("create:"):
+            return await self._profile_create_flow()
+        target = choice.removeprefix("switch: ")
+        try:
+            message = await self.session.switch_profile(target)
+        except ValueError as exc:
+            return f"Could not switch profile: {exc}"
+        self._reload_session_themes()
+        return message
+
+    async def _profile_create_flow(self) -> str:
+        """Ask for a name, then clone or scaffold, then report."""
+        runtime = getattr(self.session, "extension_runtime", None)
+        ui = getattr(runtime, "ui", None)
+        if ui is None:
+            return "Profile creation needs an interactive UI."
+        name = await ui.input("Profile name", "letters, digits, '-' and '_'")
+        if name is None or not name.strip():
+            return "Profile creation cancelled."
+        name = name.strip()
+        existing = self.session.list_profiles()
+        if name in existing:
+            return f"Profile {name!r} already exists — switch with /profile {name}."
+        clone = await ui.confirm(
+            f"Create profile {name!r}",
+            "Clone the current provider, model, thinking level, and tools?",
+        )
+        try:
+            message = self.session.create_profile(name, clone_current=clone)
+        except ValueError as exc:
+            return f"Could not create profile: {exc}"
+        switched = await ui.confirm(
+            f"Profile {name!r} created",
+            "Switch to it now?",
+        )
+        if not switched:
+            return message
+        try:
+            return await self.session.switch_profile(name)
+        except ValueError as exc:
+            return f"{message} (could not switch: {exc})"
+
+    async def _offer_profile_creation(self, name: str) -> str | None:
+        """`/profile <unknown>`: offer to create, or None to just report."""
+        runtime = getattr(self.session, "extension_runtime", None)
+        ui = getattr(runtime, "ui", None)
+        if ui is None or not getattr(ui, "has_ui", False):
+            return None
+        confirmed = await ui.confirm(
+            f"Create profile {name!r}?",
+            "A scaffold (profile.json + SYSTEM.md) will be created under ~/.tau/profiles/.",
+        )
+        if not confirmed:
+            return None
+        try:
+            message = self.session.create_profile(name, clone_current=False)
+        except ValueError as exc:
+            return f"Could not create profile: {exc}"
+        switch = await ui.confirm(f"Profile {name!r} created", "Switch to it now?")
+        if not switch:
+            return message
+        try:
+            return await self.session.switch_profile(name)
+        except ValueError as exc:
+            return f"{message} (could not switch: {exc})"
 
     def _open_theme_picker(self) -> None:
         self.push_screen(

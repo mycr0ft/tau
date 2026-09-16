@@ -71,8 +71,7 @@ class ToolPolicy:
         return [
             tool
             for tool in tools
-            if (not allowed or tool.name in allowed)
-            and tool.name not in denied
+            if (not allowed or tool.name in allowed) and tool.name not in denied
         ]
 
     def to_json(self) -> dict[str, Any]:
@@ -154,9 +153,17 @@ class ProfileStore:
     def profiles_dir(self) -> Path:
         return self._paths.profiles_dir
 
+    def ensure_profiles_dir(self) -> Path:
+        """Create ``~/.tau/profiles/`` when missing; return it."""
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        return self.profiles_dir
+
     def list_profiles(self) -> tuple[str, ...]:
         """Profile names in sorted order (directories with profile.json)."""
         if not self.profiles_dir.is_dir():
+            # First contact with profiles: create the folder so `/profile`
+            # never dead-ends on a missing directory.
+            self.ensure_profiles_dir()
             return ()
         names = []
         for entry in sorted(self.profiles_dir.iterdir(), key=lambda p: p.name):
@@ -185,31 +192,23 @@ class ProfileStore:
 
         version = data.get("version")
         if version != 1:
-            raise ProfileError(
-                f"Profile {name!r} manifest version must be 1 (got {version!r})"
-            )
+            raise ProfileError(f"Profile {name!r} manifest version must be 1 (got {version!r})")
         stored_name = data.get("name")
         if stored_name is not None and stored_name != name:
-            raise ProfileError(
-                f"Profile {name!r} manifest declares name {stored_name!r}"
-            )
+            raise ProfileError(f"Profile {name!r} manifest declares name {stored_name!r}")
 
         provider = _optional_str(data, "provider", name)
         model = _optional_str(data, "model", name)
         thinking = _optional_str(data, "thinking_level", name)
         auto_compact = data.get("auto_compact_enabled")
         if auto_compact is not None and not isinstance(auto_compact, bool):
-            raise ProfileError(
-                f"Profile {name!r} auto_compact_enabled must be a boolean"
-            )
+            raise ProfileError(f"Profile {name!r} auto_compact_enabled must be a boolean")
         tools = ToolPolicy.from_json(data.get("tools"))
 
         if tools.deny and tools.allow:
             overlap = set(tools.allow) & set(tools.deny)
             if overlap:
-                raise ProfileError(
-                    f"Profile {name!r} both allows and denies: {sorted(overlap)}"
-                )
+                raise ProfileError(f"Profile {name!r} both allows and denies: {sorted(overlap)}")
 
         return Profile(
             name=name,
@@ -239,6 +238,11 @@ class ProfileStore:
             json.dumps(manifest_data, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        scaffold = bool(values.get("scaffold"))
+        if scaffold:
+            system_template = values.get("system_prompt")
+            if isinstance(system_template, str) and system_template:
+                (directory / "SYSTEM.md").write_text(system_template, encoding="utf-8")
         return self.get(name)
 
 

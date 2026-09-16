@@ -98,3 +98,62 @@ async def test_list_profiles_reports_available_names(tmp_path: Path) -> None:
     session = await _make_session(tmp_path)
 
     assert session.list_profiles() == ("alpha", "beta")
+
+
+@pytest.mark.anyio
+async def test_list_profiles_creates_missing_profiles_dir(tmp_path: Path) -> None:
+    session = await _make_session(tmp_path)
+
+    names = session.list_profiles()
+
+    assert names == ()
+    assert (tmp_path / ".tau" / "profiles").is_dir()
+
+
+@pytest.mark.anyio
+async def test_create_profile_scaffolds_minimal_profile(tmp_path: Path) -> None:
+    session = await _make_session(tmp_path)
+
+    message = session.create_profile("minimal", clone_current=False)
+
+    assert "minimal" in message
+    profile_dir = tmp_path / ".tau" / "profiles" / "minimal"
+    assert (profile_dir / "profile.json").is_file()
+    assert (profile_dir / "SYSTEM.md").is_file()
+    manifest = json.loads((profile_dir / "profile.json").read_text(encoding="utf-8"))
+    assert manifest["name"] == "minimal"
+    assert manifest["version"] == 1
+    # A scaffold carries no cloned tool allow-list.
+    assert "tools" not in manifest
+
+
+@pytest.mark.anyio
+async def test_create_profile_clone_captures_current_tools(tmp_path: Path) -> None:
+    session = await _make_session(tmp_path)
+
+    session.create_profile("clone", clone_current=True)
+
+    profile_dir = tmp_path / ".tau" / "profiles" / "clone"
+    manifest = json.loads((profile_dir / "profile.json").read_text(encoding="utf-8"))
+    tool_names = [tool.name for tool in session.tools]
+    assert manifest["tools"]["allow"] == tool_names
+
+
+@pytest.mark.anyio
+async def test_create_profile_rejects_duplicate(tmp_path: Path) -> None:
+    session = await _make_session(tmp_path)
+
+    session.create_profile("dup", clone_current=False)
+    with pytest.raises(ValueError, match="already exists"):
+        session.create_profile("dup", clone_current=False)
+
+
+@pytest.mark.anyio
+async def test_create_then_switch_round_trip(tmp_path: Path) -> None:
+    session = await _make_session(tmp_path)
+
+    session.create_profile("made", clone_current=True)
+    message = await session.switch_profile("made")
+
+    assert message == "Switched to profile: made"
+    assert session.profile_name == "made"
