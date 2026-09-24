@@ -397,6 +397,11 @@ def main(
         typer.echo(f"tau {current_version}")
         raise typer.Exit()
 
+    try:
+        TauPaths()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="TAU_HOME") from exc
+
     if ctx.invoked_subcommand is not None:
         return
 
