@@ -4698,7 +4698,17 @@ class TauTuiApp(App[None]):
 
     async def prompt_tool_approval(self, request: ApprovalRequest) -> ApprovalChoice | None:
         """Resolve one tool-call approval through the Textual modal stack."""
-        return await self.push_screen_wait(ToolApprovalScreen(request))
+        choice = await self.push_screen_wait(ToolApprovalScreen(request))
+        classification = request.risk.classification
+        outcome = choice if choice is not None else "denied (cancelled)"
+        self._append_command_message(
+            "/approvals",
+            f"Decision: {outcome}\nTool: {request.tool}\n"
+            f"Assessment: {classification}"
+            + (" — sensitive" if request.risk.sensitive else "")
+            + f"\nCall: {request.summary}",
+        )
+        return choice
 
     def _sync_session_title(self) -> None:
         """Reflect the active session name in the terminal tab title."""
