@@ -3023,6 +3023,7 @@ class CodingSession:
                 trust_interactive=self._config.trust_interactive,
                 trust_prompt=self._config.trust_prompt,
                 tool_approval=self._config.tool_approval,
+                tool_policy=self._config.tool_policy,
                 defer_authoritative_writes=dynamic_resume,
                 owns_initial_provider=dynamic_resume,
             )
