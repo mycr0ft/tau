@@ -515,12 +515,23 @@ class ApprovalStore:
 
 @dataclass(slots=True)
 class ToolApprovalConfig:
-    """Everything the resolver needs besides runtime state."""
+    """Everything the resolver needs besides runtime state.
+
+    Carry one instance across session replacement/reload: the cached
+    ``resolver`` (session rules + audit trail) then survives, mirroring the
+    project-trust coordinator's per-process continuity.
+    """
 
     jail: PathJail | None = None
     store: ApprovalStore | None = None
     requester: Requester | None = None
     run_override: RunOverride | None = None
+    resolver: ApprovalDecisionResolver | None = None
+
+    def resolver_for_session(self) -> ApprovalDecisionResolver:
+        if self.resolver is None:
+            self.resolver = ApprovalDecisionResolver(self)
+        return self.resolver
 
 
 class ApprovalDecisionResolver:
