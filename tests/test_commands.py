@@ -125,6 +125,7 @@ def test_registered_commands_are_pi_aligned(tmp_path: Path) -> None:
     commands = create_default_command_registry().list_commands()
 
     assert [command.name for command in commands] == [
+        "approvals",
         "compact",
         "export",
         "hotkeys",
