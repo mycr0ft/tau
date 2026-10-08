@@ -58,8 +58,12 @@ Saved rules are narrow (`tool` plus optional path prefix); deny rules win, the
 store is versioned, locked, atomically replaced, and fails closed. Headless
 runs never prompt: in-jail harmless calls run, everything else is denied with
 the reason delivered to the model. `--approve-tools` and `--no-approve-tools`
-are run-only overrides. The gate is an application-layer choke point, not a
-filesystem, process, network, or exfiltration sandbox.
+are run-only overrides. A profile manifest may carry the jail as a preset
+(`toolApproval.jail`: paths plus reads/writes-outside policy), so a hardened
+setup ships as one profile; `/approvals` lists saved rules and run-scoped
+decisions, and `/approvals remove N` deletes saved rule N. The gate is an
+application-layer choke point, not a filesystem, process, network, or
+exfiltration sandbox.
 
 ## General boundary
 
