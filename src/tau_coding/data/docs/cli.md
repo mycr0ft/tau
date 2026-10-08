@@ -47,6 +47,11 @@ tau [OPTIONS] [PROMPT]
   remain available.
 - `--project-extensions`: opt in to trusted project extensions after approval.
 - `-a, --approve` / `-na, --no-approve`: run-only project-trust decisions.
+- `--approve-tools` / `--no-approve-tools`: run-only per-call approval overrides
+  (mutually exclusive; every tool call allowed without prompting, or every
+  non-jail call denied for audit).
+- `--jail PATH`: confine path-taking tools to this directory (repeatable;
+  reads and writes outside ask for approval by default).
 
 Explicit `--provider` and `--model` overrides take precedence over a resumed
 provider-aware transcript entry. Print mode reports actionable errors instead of
@@ -65,6 +70,11 @@ four-hour freshness window. Cached/bundled models remain available on failure;
 set `TAU_OFFLINE=1` to disable catalog network access.
 
 ## Safety boundary
+
+The per-call approval gate asks before sensitive tool calls (smart-card or
+token access, upload-shaped transfers) and about paths outside an active
+`--jail`; see `security.md`. Like project trust, it is an application-layer
+choke point, not a sandbox.
 
 Project trust controls ambient project-resource loading; it is not a sandbox.
 Built-in local backends are trusted package code and do not create a project

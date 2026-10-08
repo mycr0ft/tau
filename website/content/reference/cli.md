@@ -60,12 +60,21 @@ features and fixes.
 | `--project-extensions` | Also load trusted `<project>/.tau/extensions`; project trust and this code opt-in are both required |
 | `-a, --approve` | Trust protected project inputs for this invocation only |
 | `-na, --no-approve` | Decline protected project inputs for this invocation only |
+| `--approve-tools` | Allow every tool call for this invocation without per-call approval |
+| `--no-approve-tools` | Deny every tool call outside an active jail for this invocation |
+| `--jail PATH` | Confine path-taking tools to this directory (repeatable; outside reads/writes ask by default) |
 | `-v, --version` | Print the version and exit |
 
 `tau install` accepts local Python files, local package directories, Pi-style
 `git:github.com/owner/repository[@ref]` sources, and normal HTTP/SSH Git URLs.
 See [Extensions]({{< relref "../guides/extensions.md#install-an-extension" >}})
 for package-layout, dependency, and security details.
+
+`--approve-tools` and `--no-approve-tools` are mutually exclusive run-only
+overrides for the per-call approval gate; they never write the approvals
+store. `--jail` confines path-taking tools to trusted directories. See
+[Project trust]({{< relref "../guides/project-trust.md" >}}) for the input
+guard and the shared non-sandbox boundary.
 
 `--approve` and `--no-approve` are mutually exclusive and never write the
 trust store. See [Project trust]({{< relref "../guides/project-trust.md" >}})

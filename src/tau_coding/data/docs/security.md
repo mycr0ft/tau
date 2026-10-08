@@ -46,6 +46,21 @@ up or reported for recovery; old-credential cleanup failure does not invalidate
 the committed new configuration. Reset removes safe settings first and deletes a
 stored credential only after separate confirmation.
 
+## Per-call approval gate
+
+Sessions may run with an approval gate that asks before individual tool calls:
+smart-card/security-token programs (`pkcs11-tool`, `opensc-tool`, `piv-tool`,
+`ykman`, `gpg --card-*`) and upload-shaped transfers (`curl -T/-F/-d`,
+`scp`, `rsync`, `aws s3`, `rclone`) always require fresh interactive approval
+and can never be persisted as rules. Path-taking tools are confined by an
+optional user-level path jail; reads and writes outside it ask by default.
+Saved rules are narrow (`tool` plus optional path prefix); deny rules win, the
+store is versioned, locked, atomically replaced, and fails closed. Headless
+runs never prompt: in-jail harmless calls run, everything else is denied with
+the reason delivered to the model. `--approve-tools` and `--no-approve-tools`
+are run-only overrides. The gate is an application-layer choke point, not a
+filesystem, process, network, or exfiltration sandbox.
+
 ## General boundary
 
 Project trust is an input-loading guard, not a filesystem, process, shell,
