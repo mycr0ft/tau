@@ -174,7 +174,11 @@ from tau_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
-from tau_coding.tool_approval import Requester, ToolApprovalConfig
+from tau_coding.tool_approval import (
+    ApprovalDecisionResolver,
+    Requester,
+    ToolApprovalConfig,
+)
 from tau_coding.tools import ImageSupportState, create_bash_tool, create_coding_tools
 
 StreamingBehavior = Literal["steer", "follow_up"]
@@ -505,6 +509,7 @@ class CodingSession:
         self._runtime_model_limits_key: tuple[str, str] | None = None
         self._model_limits_discovery_error: str | None = None
         self._project_trust_resolution = project_trust_resolution
+        self._config_before_profile_switch: CodingSessionConfig | None = None
         self._project_trust_commit_pending = False
         self._persistence_unsubscribe: Callable[[], None] | None = None
         self._persisted_message_ids: set[int] = set()
@@ -1557,6 +1562,17 @@ class CodingSession:
         """Return the last diagnostic log path written by this session."""
         return self._last_diagnostic_log_path
 
+    def approval_resolver(self) -> ApprovalDecisionResolver | None:
+        """Return the live approval gate resolver, or None when the gate is off."""
+        config = self._config.tool_approval
+        if config is None:
+            return None
+        return config.resolver_for_session()
+
+    def tool_approval_config(self) -> ToolApprovalConfig | None:
+        """Return the active approval-gate configuration, or None."""
+        return self._config.tool_approval
+
     def set_tool_approval_requester(self, requester: Requester) -> None:
         """Install the active frontend's approval requester on the live gate."""
         config = self._config.tool_approval
@@ -2523,11 +2539,23 @@ class CodingSession:
             profile_root=profile.directory,
         )
         self._resource_paths = new_paths
+        merged_approval = self._config.tool_approval
+        if merged_approval is not None:
+            # The switched-to profile defines the cage; its jail replaces the
+            # old one. Run-only overrides are invocation state and survive.
+            current = self._config.tool_approval
+            assert current is not None
+            merged_approval = replace(merged_approval, jail=profile.tool_approval_jail)
+            merged_approval.resolver = current.resolver_for_session()
+        elif profile.tool_approval_jail is not None:
+            merged_approval = ToolApprovalConfig(jail=profile.tool_approval_jail)
+        self._config_before_profile_switch = self._config
         self._config = replace(
             self._config,
             resource_paths=new_paths,
             profile_name=profile.name,
             tool_policy=profile.tools,
+            tool_approval=merged_approval,
         )
         try:
             await self.reload()

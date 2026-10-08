@@ -92,6 +92,10 @@ class CommandSession(Protocol):
     @property
     def session_title(self) -> str | None: ...
 
+    def approval_resolver(self) -> object | None: ...
+
+    def tool_approval_config(self) -> object | None: ...
+
     @property
     def session_manager(self) -> SessionManager | None: ...
 
@@ -226,6 +230,15 @@ class CommandRegistry:
 def create_default_command_registry() -> CommandRegistry:
     """Create Tau's built-in slash command registry."""
     registry = CommandRegistry()
+    registry.register(
+        SlashCommand(
+            name="approvals",
+            usage="/approvals [remove N]",
+            description="List saved approval rules and run-scoped decisions.",
+            handler=_approvals_command,
+            search_terms=("approval", "gate", "jail", "rules"),
+        )
+    )
     registry.register(
         SlashCommand(
             name="quit",
@@ -600,6 +613,62 @@ def _learn_command(context: CommandContext) -> CommandResult:
     # Curation is an async provider call, so frontends execute it from their
     # async command path, mirroring /reload's flag-then-run pattern.
     return CommandResult(handled=True, learn_requested=True)
+
+
+def _approvals_command(context: CommandContext) -> CommandResult:
+    """List saved approval rules and the current gate state."""
+    session = context.session
+    resolver_getter = getattr(session, "approval_resolver", None)
+    config_getter = getattr(session, "tool_approval_config", None)
+    resolver = resolver_getter() if callable(resolver_getter) else None
+    config = config_getter() if callable(config_getter) else None
+    lines: list[str] = []
+    if resolver is None:
+        lines.append(
+            "The per-call approval gate is not active in this session "
+            "(start with --jail or an approval profile preset to enable it)."
+        )
+        return CommandResult(handled=True, message="\n".join(lines))
+
+    store = config.store if config is not None else None
+    if store is not None:
+        try:
+            rules = store.read()
+        except Exception as exc:  # noqa: BLE001 - fail-closed diagnostics only
+            rules = ()
+            lines.append(f"(approvals store unreadable, failing closed: {exc})")
+        if rules:
+            lines.append("Saved rules:")
+            for index, rule in enumerate(rules):
+                scope = f" path={rule.path_prefix}" if rule.path_prefix else ""
+                lines.append(f"  {index + 1}. {rule.kind} {rule.tool}{scope}")
+        else:
+            lines.append("No saved rules in ~/.tau/approvals.json.")
+    if resolver._session_allow:
+        lines.append(f"Allowed for this run: {', '.join(sorted(resolver._session_allow))}")
+    if resolver._session_deny:
+        lines.append(f"Denied for this run: {', '.join(sorted(resolver._session_deny))}")
+
+    remove_args = context.args.strip().split()
+    if remove_args and remove_args[0] == "remove" and len(remove_args) == 2:
+        if store is None:
+            lines.append("No approvals store available.")
+            return CommandResult(handled=True, message="\n".join(lines))
+        try:
+            index = int(remove_args[1])
+        except ValueError:
+            return CommandResult(handled=True, message="Usage: /approvals remove N")
+        try:
+            rules = store.read()
+            rule = rules[index - 1]
+        except (IndexError, ValueError):
+            return CommandResult(
+                handled=True, message=f"No rule {remove_args[1]} (see /approvals)."
+            )
+        store.remove(rule)
+        scope = f" path={rule.path_prefix}" if rule.path_prefix else ""
+        lines.append(f"Removed rule {index}: {rule.kind} {rule.tool}{scope}")
+    return CommandResult(handled=True, message="\n".join(lines))
 
 
 def _profile_command(context: CommandContext) -> CommandResult:

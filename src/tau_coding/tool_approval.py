@@ -394,6 +394,42 @@ class PathJail:
             return self.reads_outside
         return self.writes_outside
 
+    def to_json(self) -> dict[str, object]:
+        """Manifest-ready JSON (tilde-relative preserved for portability)."""
+        data: dict[str, object] = {
+            "paths": [str(path) for path in self.paths],
+            "readsOutside": self.reads_outside,
+            "writesOutside": self.writes_outside,
+        }
+        return data
+
+    @staticmethod
+    def from_json(data: object) -> PathJail:
+        if data is None:
+            return PathJail()
+        if not isinstance(data, dict):
+            raise ToolApprovalError("profile toolApproval jail must be an object")
+        raw_paths = data.get("paths", [])
+        if not isinstance(raw_paths, list) or not raw_paths:
+            raise ToolApprovalError("profile toolApproval jail.paths must be a non-empty list")
+        paths = []
+        for raw in raw_paths:
+            if not isinstance(raw, str) or not raw.strip():
+                raise ToolApprovalError("profile toolApproval jail.paths entries must be strings")
+            paths.append(Path(raw).expanduser())
+        reads = data.get("readsOutside", "ask")
+        writes = data.get("writesOutside", "ask")
+        for key, value in (("readsOutside", reads), ("writesOutside", writes)):
+            if value not in ("ask", "allow", "deny"):
+                raise ToolApprovalError(
+                    f"profile toolApproval jail.{key} must be ask, allow, or deny"
+                )
+        return PathJail(
+            paths=tuple(paths),
+            reads_outside=reads,
+            writes_outside=writes,
+        )
+
 
 # --- approvals store -------------------------------------------------------
 

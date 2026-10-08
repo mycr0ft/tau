@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from tau_coding.paths import TauPaths
+from tau_coding.tool_approval import PathJail
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class Profile:
     model: str | None = None
     thinking_level: str | None = None
     tools: ToolPolicy = field(default_factory=ToolPolicy)
+    tool_approval_jail: PathJail | None = None
     auto_compact_enabled: bool | None = None
 
     @property
@@ -204,6 +206,9 @@ class ProfileStore:
         if auto_compact is not None and not isinstance(auto_compact, bool):
             raise ProfileError(f"Profile {name!r} auto_compact_enabled must be a boolean")
         tools = ToolPolicy.from_json(data.get("tools"))
+        approval_data = data.get("toolApproval")
+        jail_data = approval_data.get("jail") if isinstance(approval_data, dict) else None
+        jail = PathJail.from_json(jail_data)
 
         if tools.deny and tools.allow:
             overlap = set(tools.allow) & set(tools.deny)
@@ -217,6 +222,7 @@ class ProfileStore:
             model=model,
             thinking_level=thinking,
             tools=tools,
+            tool_approval_jail=jail if jail.active else None,
             auto_compact_enabled=auto_compact,
         )
 
@@ -232,6 +238,9 @@ class ProfileStore:
                 manifest_data[key] = values[key]
         if "tools" in values and values["tools"] is not None:
             manifest_data["tools"] = _tool_policy_json(values["tools"])
+        jail = values.get("tool_approval_jail")
+        if isinstance(jail, PathJail) and jail.active:
+            manifest_data["toolApproval"] = {"jail": jail.to_json()}
 
         directory.mkdir(parents=True, exist_ok=False)
         (directory / PROFILE_MANIFEST).write_text(

@@ -9122,6 +9122,15 @@ async def run_tui_app(
                     if profile_root is not None
                     else None
                 ),
+                tool_approval=(
+                    ToolApprovalConfig(
+                        jail=ProfileStore().get(profile_root.name).tool_approval_jail
+                    )
+                    if profile_root is not None
+                    and ProfileStore().get(profile_root.name).tool_approval_jail is not None
+                    and tool_approval is None
+                    else tool_approval
+                ),
                 provider_name=selected_provider_name,
                 inference_provider=inference_provider,
                 inference_provider_mode=inference_provider_mode,
@@ -9141,7 +9150,6 @@ async def run_tui_app(
                 thinking_level_override=thinking_level_override,
                 trust_override=trust_override,
                 trust_default=shell_settings.default_project_trust,
-                tool_approval=tool_approval,
                 trust_interactive=True,
                 trust_prompt=prompt_project_trust,
                 defer_authoritative_writes=True,

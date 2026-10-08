@@ -43,6 +43,37 @@ model as the tool error. `--approve-tools` allows every call for one
 invocation; `--no-approve-tools` denies every call outside the jail. Neither
 writes the approvals store.
 
+## Profiles as presets
+
+A profile can carry the jail as a manifest preset, so a hardened setup is one
+`/profile` switch away:
+
+```json
+{
+  "version": 1,
+  "name": "cui",
+  "tools": { "deny": ["bash"] },
+  "toolApproval": {
+    "jail": {
+      "paths": ["~/work/cui-root"],
+      "readsOutside": "ask",
+      "writesOutside": "deny"
+    }
+  }
+}
+```
+
+`--jail PATH` (repeatable) and the run-only tool overrides override the preset
+per invocation. Switching profiles with `/profile` applies the switched-to
+profile's jail to the live gate; run-only overrides survive the switch.
+
+## Inspecting decisions
+
+`/approvals` lists the saved rules in `~/.tau/approvals.json`, any
+run-scoped allow/deny decisions from this session, and whether the gate is
+active at all. `/approvals remove N` deletes saved rule `N` (numbered as
+listed); removal takes effect on the next matching call.
+
 ## Boundary
 
 The gate is an application-layer choke point, not a sandbox. bash commands

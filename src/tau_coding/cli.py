@@ -69,7 +69,12 @@ from tau_coding.session_manager import CodingSessionRecord, SessionManager, vali
 from tau_coding.session_preparation import prepare_coding_session
 from tau_coding.shell_config import load_shell_settings
 from tau_coding.thinking import THINKING_LEVELS, ThinkingLevel, normalize_thinking_level
-from tau_coding.tool_approval import PathJail, RunOverride, ToolApprovalConfig
+from tau_coding.tool_approval import (
+    JailOutsidePolicy,
+    PathJail,
+    RunOverride,
+    ToolApprovalConfig,
+)
 from tau_coding.tui import run_tui_app
 from tau_coding.update_check import (
     UpdateNotice,
@@ -437,17 +442,6 @@ def main(
     tool_run_override: RunOverride | None = (
         "approve" if approve_tools else "decline" if no_approve_tools else None
     )
-    tool_approval: ToolApprovalConfig | None = None
-    if jail or tool_run_override is not None:
-        tool_approval = ToolApprovalConfig(
-            jail=(
-                PathJail(paths=tuple(Path(str(item)).expanduser() for item in jail))
-                if jail
-                else None
-            ),
-            run_override=tool_run_override,
-        )
-
     if resume is not None:
         raise typer.BadParameter(
             f"--resume was renamed to --session. Use `tau --session {resume}` instead."
@@ -578,6 +572,36 @@ def main(
         except ProfileError as exc:
             raise typer.BadParameter(str(exc)) from exc
         profile_root = profile_data.directory
+
+    # Approval-gate config: the profile manifest supplies the jail preset;
+    # explicit CLI flags override per-field. Built after profile resolution so
+    # the manifest can contribute its preset.
+    tool_approval: ToolApprovalConfig | None = None
+    manifest_jail = getattr(profile_data, "tool_approval_jail", None)
+    if jail or manifest_jail is not None or tool_run_override is not None:
+        paths: tuple[Path, ...] = ()
+        reads_outside: JailOutsidePolicy = "ask"
+        writes_outside: JailOutsidePolicy = "ask"
+        if manifest_jail is not None:
+            paths = manifest_jail.paths
+            reads_outside = manifest_jail.reads_outside
+            writes_outside = manifest_jail.writes_outside
+        if jail:
+            paths = tuple(Path(str(item)).expanduser() for item in jail)
+        gate_jail = (
+            PathJail(
+                paths=paths,
+                reads_outside=reads_outside,
+                writes_outside=writes_outside,
+            )
+            if paths
+            else None
+        )
+        tool_approval = ToolApprovalConfig(jail=gate_jail, run_override=tool_run_override)
+
+    # Approval-gate preset: the profile manifest supplies the jail; explicit
+    # CLI flags override per-field. A gate config exists when either source
+    # contributes anything.
 
     if rpc_requested:
         if initial_prompt is not None:
