@@ -301,15 +301,21 @@ def classify_bash_command(command: str) -> ToolRisk:
                 sensitive=True,
                 reasons=("aws storage transfer (s3)",),
             )
-        if base in _FETCH_PROGRAMS and any(
-            flag.startswith("-") and (flag in _EXFIL_UPLOAD_FLAGS or flag.startswith("--data"))
-            for flag in words[index + 1 : index + 25]
-        ):
-            return ToolRisk(
-                classification="exfil-capable",
-                sensitive=True,
-                reasons=(f"upload-shaped {base} invocation",),
+        if base in _FETCH_PROGRAMS:
+            upload_shaped = any(
+                flag in _EXFIL_UPLOAD_FLAGS or flag.startswith("--data")
+                for flag in words[index + 1 : index + 25]
             )
+            if upload_shaped:
+                return ToolRisk(
+                    classification="exfil-capable",
+                    sensitive=True,
+                    reasons=(f"upload-shaped {base} invocation",),
+                )
+            if classification == "command":
+                classification = "network"
+                reasons.append(f"{base} fetch to a model-chosen destination")
+            continue
         subcommands = _NETWORK_SUBCOMMAND_PROGRAMS.get(base)
         if subcommands is not None and any(
             sub in words[index + 1 : index + 3] for sub in subcommands
@@ -372,11 +378,15 @@ class PathJail:
                 continue
         return False
 
-    def resolve_target(self, raw: str | Path) -> Path:
-        """Canonicalize one jail candidate; nonexistent write targets use parents."""
+    def resolve_target(self, raw: str | Path, *, base: Path | None = None) -> Path:
+        """Canonicalize one jail candidate; nonexistent write targets use parents.
+
+        Relative arguments resolve against ``base`` (the session cwd, injected
+        by the wiring layer) or the process cwd when unset.
+        """
         path = Path(raw).expanduser()
         if not path.is_absolute():
-            path = Path.cwd() / path
+            path = (base or Path.cwd()) / path
         return path.resolve()
 
     def outside_policy(self, classification: ToolClass) -> JailOutsidePolicy:
