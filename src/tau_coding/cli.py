@@ -69,6 +69,7 @@ from tau_coding.session_manager import CodingSessionRecord, SessionManager, vali
 from tau_coding.session_preparation import prepare_coding_session
 from tau_coding.shell_config import load_shell_settings
 from tau_coding.thinking import THINKING_LEVELS, ThinkingLevel, normalize_thinking_level
+from tau_coding.tool_approval import PathJail, RunOverride, ToolApprovalConfig
 from tau_coding.tui import run_tui_app
 from tau_coding.update_check import (
     UpdateNotice,
@@ -382,6 +383,27 @@ def main(
         bool,
         typer.Option("--no-approve", "-na", help="Decline protected project inputs for this run."),
     ] = False,
+    approve_tools: Annotated[
+        bool,
+        typer.Option(
+            "--approve-tools",
+            help="Allow every tool call this run without per-call approval.",
+        ),
+    ] = False,
+    no_approve_tools: Annotated[
+        bool,
+        typer.Option(
+            "--no-approve-tools",
+            help="Deny every tool call outside the jail for this run (audit only).",
+        ),
+    ] = False,
+    jail: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--jail",
+            help="Confine path-taking tools to this directory (repeatable).",
+        ),
+    ] = None,
     version: Annotated[
         bool,
         typer.Option("--version", "-v", help="Show Tau's version and exit."),
@@ -410,6 +432,21 @@ def main(
     trust_override: TrustOverride | None = (
         "approve" if approve else "decline" if no_approve else None
     )
+    if approve_tools and no_approve_tools:
+        raise typer.BadParameter("--approve-tools and --no-approve-tools cannot be used together")
+    tool_run_override: RunOverride | None = (
+        "approve" if approve_tools else "decline" if no_approve_tools else None
+    )
+    tool_approval: ToolApprovalConfig | None = None
+    if jail or tool_run_override is not None:
+        tool_approval = ToolApprovalConfig(
+            jail=(
+                PathJail(paths=tuple(Path(str(item)).expanduser() for item in jail))
+                if jail
+                else None
+            ),
+            run_override=tool_run_override,
+        )
 
     if resume is not None:
         raise typer.BadParameter(
@@ -554,7 +591,11 @@ def main(
                     thinking_level_override=thinking_level_override,
                 )
                 if thinking_level_override is not None
-                else run_openai_rpc_mode,
+                else (
+                    partial(run_openai_rpc_mode, tool_approval=tool_approval)
+                    if tool_approval is not None
+                    else run_openai_rpc_mode
+                ),
                 model,
                 cwd or Path.cwd(),
                 provider,
@@ -589,11 +630,12 @@ def main(
                 resolved_append_system_prompt,
                 profile_root,
             )
-            tui_runner = (
-                partial(run_openai_tui, thinking_level_override=thinking_level_override)
-                if thinking_level_override is not None
-                else run_openai_tui
-            )
+            tui_kwargs: dict[str, Any] = {}
+            if thinking_level_override is not None:
+                tui_kwargs["thinking_level_override"] = thinking_level_override
+            if tool_approval is not None:
+                tui_kwargs["tool_approval"] = tool_approval
+            tui_runner = partial(run_openai_tui, **tui_kwargs) if tui_kwargs else run_openai_tui
             resumable_session_id = (
                 anyio.run(tui_runner, *tui_args)  # type: ignore[arg-type]
                 if trust_override is None
@@ -631,11 +673,13 @@ def main(
             custom_system_prompt,
             resolved_append_system_prompt,
         )
-        runner_kwargs: dict[str, Any] = (
-            {"profile_root": profile_root} if profile_root is not None else {}
-        )
+        runner_kwargs: dict[str, Any] = {}
+        if profile_root is not None:
+            runner_kwargs["profile_root"] = profile_root
         if thinking_level_override is not None:
             runner_kwargs["thinking_level_override"] = thinking_level_override
+        if tool_approval is not None:
+            runner_kwargs["tool_approval"] = tool_approval
         print_runner = (
             partial(run_openai_print_mode, **runner_kwargs)
             if runner_kwargs
@@ -673,6 +717,7 @@ async def run_openai_tui(
     profile_root: Path | None = None,
     *,
     thinking_level_override: ThinkingLevel | None = None,
+    tool_approval: ToolApprovalConfig | None = None,
 ) -> str | None:
     """Run the Textual TUI and return its resumable session id, if any."""
     release_notes_notice = startup_release_notes_notice(_current_version())
@@ -695,6 +740,7 @@ async def run_openai_tui(
         trust_override=trust_override,
         thinking_level_override=thinking_level_override,
         profile_root=profile_root,
+        tool_approval=tool_approval,
     )
 
 
@@ -970,6 +1016,7 @@ async def run_openai_rpc_mode(
     trust_override: TrustOverride | None = None,
     *,
     thinking_level_override: ThinkingLevel | None = None,
+    tool_approval: ToolApprovalConfig | None = None,
 ) -> None:
     """Run a persistent Pi-compatible JSONL RPC session."""
     settings = load_provider_settings()
@@ -1053,6 +1100,7 @@ async def run_openai_rpc_mode(
             append_system_prompt=append_system_prompt,
             trust_override=trust_override,
             trust_default=shell_settings.default_project_trust,
+            tool_approval=tool_approval,
         )
     )
     session.extension_runtime.set_ui_bridge(StderrUiBridge())
@@ -1080,6 +1128,7 @@ async def run_openai_print_mode(
     profile_root: Path | None = None,
     *,
     thinking_level_override: ThinkingLevel | None = None,
+    tool_approval: ToolApprovalConfig | None = None,
 ) -> bool:
     """Run a new or resumed print-mode turn using the configured provider."""
     settings = load_provider_settings()
@@ -1213,6 +1262,7 @@ async def run_openai_print_mode(
             append_system_prompt=append_system_prompt,
             trust_override=trust_override,
             trust_default=shell_settings.default_project_trust,
+            tool_approval=tool_approval,
             startup_model_override=False,
             inference_provider_mode=runtime_inference_mode,
             thinking_level_override=thinking_level_override,
@@ -1320,6 +1370,7 @@ async def run_print_mode(
     trust_default: TrustDefault = "ask",
     startup_model_override: bool = False,
     thinking_level_override: ThinkingLevel | None = None,
+    tool_approval: ToolApprovalConfig | None = None,
 ) -> bool:
     """Run one non-interactive prompt and print streamed events.
 
@@ -1354,6 +1405,7 @@ async def run_print_mode(
             append_system_prompt=append_system_prompt,
             trust_override=trust_override,
             trust_default=trust_default,
+            tool_approval=tool_approval,
         ),
         session_loader=CodingSession,
     )

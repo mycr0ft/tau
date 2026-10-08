@@ -150,6 +150,7 @@ from tau_coding.shell_config import load_shell_settings
 from tau_coding.skills import Skill
 from tau_coding.system_prompt import SystemPromptInspection
 from tau_coding.thinking import ThinkingLevel
+from tau_coding.tool_approval import ToolApprovalConfig
 from tau_coding.tui.adapter import TuiEventAdapter
 from tau_coding.tui.autocomplete import (
     CompletionItem,
@@ -8965,6 +8966,7 @@ async def run_tui_app(
     trust_override: TrustOverride | None = None,
     thinking_level_override: ThinkingLevel | None = None,
     profile_root: Path | None = None,
+    tool_approval: ToolApprovalConfig | None = None,
 ) -> str | None:
     """Run the Textual app and return the active id when its session is persisted."""
     _configure_herdr_textual_mouse()
@@ -9120,6 +9122,7 @@ async def run_tui_app(
                 thinking_level_override=thinking_level_override,
                 trust_override=trust_override,
                 trust_default=shell_settings.default_project_trust,
+                tool_approval=tool_approval,
                 trust_interactive=True,
                 trust_prompt=prompt_project_trust,
                 defer_authoritative_writes=True,
