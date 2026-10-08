@@ -175,6 +175,9 @@ no code changes required.
 
 - Interactive Textual TUI and non-interactive print mode.
 - Built-in coding tools: `read`, `write`, `edit`, and `bash`.
+- Per-call tool approval: sensitive calls (smart-card access, upload-shaped
+  transfers) always ask; an optional path jail confines file tools; headless
+  runs deny deterministically. See the tool approvals guide.
 - Durable JSONL sessions under `~/.tau/sessions/` with resume and branching.
 - Cross-session learning: `/learn` saves durable memory entries and lessons
   that future sessions carry in their prompts.
