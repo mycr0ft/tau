@@ -174,6 +174,7 @@ from tau_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
+from tau_coding.tool_approval import ToolApprovalConfig
 from tau_coding.tools import ImageSupportState, create_bash_tool, create_coding_tools
 
 StreamingBehavior = Literal["steer", "follow_up"]
@@ -359,6 +360,8 @@ class CodingSessionConfig:
     """Active profile name, when one is selected (display + tool policy)."""
     tool_policy: ToolPolicy | None = None
     """Allow/deny filter applied to the composed toolset (from a profile)."""
+    tool_approval: ToolApprovalConfig | None = None
+    """Per-call approval gate configuration; ``None`` keeps the gate off."""
     session_id: str | None = None
     session_manager: SessionManager | None = None
     command_registry: CommandRegistry | None = None
@@ -762,6 +765,11 @@ class CodingSession:
                 )
             )
         )
+        before_tool_call = (
+            config.tool_approval.resolver_for_session().dispatch
+            if config.tool_approval is not None
+            else None
+        )
         harness = AgentHarness(
             AgentHarnessConfig(
                 provider=config.provider,
@@ -769,6 +777,7 @@ class CodingSession:
                 system=system,
                 tools=tools,
                 session_id=config.session_id,
+                before_tool_call=before_tool_call,
             ),
             messages=state.messages,
         )
@@ -3005,6 +3014,7 @@ class CodingSession:
                 trust_default=self._config.trust_default,
                 trust_interactive=self._config.trust_interactive,
                 trust_prompt=self._config.trust_prompt,
+                tool_approval=self._config.tool_approval,
                 defer_authoritative_writes=dynamic_resume,
                 owns_initial_provider=dynamic_resume,
             )
