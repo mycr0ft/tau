@@ -48,6 +48,7 @@ from tau_ai.http_errors import provider_http_error_message
 from tau_ai.model_catalog import RuntimeModel, RuntimeModelCatalog, RuntimeThinkingLevel
 from tau_ai.model_limits import RuntimeModelLimits
 from tau_ai.openai_cache import openai_prompt_cache_key
+from tau_ai.opencode_affinity import merge_opencode_session_headers
 from tau_ai.provider import CancellationToken
 from tau_ai.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from tau_ai.stream import canonicalize_provider_stream
@@ -225,6 +226,9 @@ class OpenAICodexProvider:
                         account_id=credentials.account_id,
                         originator=self._config.originator,
                         session_id=cache_key,
+                    )
+                    merge_opencode_session_headers(
+                        headers, self._config.provider_name, url, session_id
                     )
                     async with client.stream(
                         "POST",

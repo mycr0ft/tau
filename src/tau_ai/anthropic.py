@@ -47,6 +47,7 @@ from tau_ai.env import (
 from tau_ai.events import AssistantMessageEvent
 from tau_ai.http import create_async_client
 from tau_ai.http_errors import provider_http_error_message
+from tau_ai.opencode_affinity import merge_opencode_session_headers
 from tau_ai.provider import CancellationToken
 from tau_ai.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from tau_ai.stream import canonicalize_provider_stream
@@ -100,9 +101,13 @@ class AnthropicProvider:
         session_id: str | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one response as Pi-compatible assistant message events."""
-        del session_id
         raw = self._stream_provider_events(
-            model=model, system=system, messages=messages, tools=tools, signal=signal
+            model=model,
+            system=system,
+            messages=messages,
+            tools=tools,
+            signal=signal,
+            session_id=session_id,
         )
         return canonicalize_provider_stream(
             raw, api="anthropic-messages", provider="anthropic", model=model
@@ -116,6 +121,7 @@ class AnthropicProvider:
         messages: list[AgentMessage],
         tools: list[AgentTool],
         signal: CancellationToken | None = None,
+        session_id: str | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         """Stream one Anthropic response as provider-neutral events."""
 
@@ -163,6 +169,7 @@ class AnthropicProvider:
             else:
                 headers["x-api-key"] = api_key
             url = f"{base_url.rstrip('/')}/messages"
+            merge_opencode_session_headers(headers, self._config.provider_name, url, session_id)
 
             attempt = 0
             while True:

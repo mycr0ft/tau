@@ -51,6 +51,7 @@ from tau_ai.events import AssistantMessageEvent
 from tau_ai.http import create_async_client
 from tau_ai.http_errors import provider_http_error_message
 from tau_ai.openai_cache import is_direct_openai_url, openai_prompt_cache_key
+from tau_ai.opencode_affinity import merge_opencode_session_headers
 from tau_ai.provider import CancellationToken
 from tau_ai.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from tau_ai.stream import canonicalize_provider_stream
@@ -267,6 +268,9 @@ class OpenAICompatibleProvider:
                 if not has_authorization:
                     headers["Authorization"] = f"Bearer {api_key}"
             _apply_session_affinity_headers(headers, session_id, session_affinity_format)
+            merge_opencode_session_headers(
+                headers, self._config.provider_name, request_url, session_id
+            )
 
             attempt = 0
             while True:
