@@ -174,7 +174,7 @@ from tau_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
-from tau_coding.tool_approval import ToolApprovalConfig
+from tau_coding.tool_approval import Requester, ToolApprovalConfig
 from tau_coding.tools import ImageSupportState, create_bash_tool, create_coding_tools
 
 StreamingBehavior = Literal["steer", "follow_up"]
@@ -1556,6 +1556,14 @@ class CodingSession:
     def last_diagnostic_log_path(self) -> Path | None:
         """Return the last diagnostic log path written by this session."""
         return self._last_diagnostic_log_path
+
+    def set_tool_approval_requester(self, requester: Requester) -> None:
+        """Install the active frontend's approval requester on the live gate."""
+        config = self._config.tool_approval
+        if config is None:
+            return
+        resolver = config.resolver_for_session()
+        resolver._config.requester = requester
 
     def set_project_trust_prompt(self, prompt: TrustPrompt) -> None:
         """Install the active frontend's trust prompt for reload/replacement."""

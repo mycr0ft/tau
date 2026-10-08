@@ -150,7 +150,11 @@ from tau_coding.shell_config import load_shell_settings
 from tau_coding.skills import Skill
 from tau_coding.system_prompt import SystemPromptInspection
 from tau_coding.thinking import ThinkingLevel
-from tau_coding.tool_approval import ToolApprovalConfig
+from tau_coding.tool_approval import (
+    ApprovalChoice,
+    ApprovalRequest,
+    ToolApprovalConfig,
+)
 from tau_coding.tui.adapter import TuiEventAdapter
 from tau_coding.tui.autocomplete import (
     CompletionItem,
@@ -187,6 +191,7 @@ from tau_coding.tui.themes import (
     textual_theme_for_tui_theme,
     theme_css_variables,
 )
+from tau_coding.tui.tool_approval import ToolApprovalScreen
 from tau_coding.tui.widgets import (
     CompactSessionInfo,
     SessionSidebar,
@@ -4691,6 +4696,10 @@ class TauTuiApp(App[None]):
         """Resolve a trust request through the active Textual modal stack."""
         return await self.push_screen_wait(ProjectTrustScreen(request))
 
+    async def prompt_tool_approval(self, request: ApprovalRequest) -> ApprovalChoice | None:
+        """Resolve one tool-call approval through the Textual modal stack."""
+        return await self.push_screen_wait(ToolApprovalScreen(request))
+
     def _sync_session_title(self) -> None:
         """Reflect the active session name in the terminal tab title."""
         self._sync_terminal_title()
@@ -9178,6 +9187,11 @@ async def run_tui_app(
             prompt_trust = getattr(app, "prompt_project_trust", None)
             if prompt_trust is not None:
                 set_trust_prompt(prompt_trust)
+        set_approval_requester = getattr(session, "set_tool_approval_requester", None)
+        if set_approval_requester is not None:
+            prompt_approval = getattr(app, "prompt_tool_approval", None)
+            if prompt_approval is not None:
+                set_approval_requester(prompt_approval)
         await app.run_async()
     finally:
         if session is not None:
