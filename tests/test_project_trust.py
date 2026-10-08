@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 from tau_agent.provider import ModelProvider
 from tau_agent.session import SessionEntry
 from tau_coding import SessionManager, jsonl_session_storage
+from tau_coding import _durable_store as durable_store_module
 from tau_coding import project_trust as project_trust_module
 from tau_coding.cli import app
 from tau_coding.paths import TauPaths
@@ -440,7 +441,7 @@ def test_store_failures_preserve_prior_non_granting_bytes(
             )
         else:
             monkeypatch.setattr(
-                project_trust_module,
+                durable_store_module,
                 "_fsync_directory",
                 lambda *_args: (_ for _ in ()).throw(OSError("directory fsync")),
             )
@@ -684,8 +685,8 @@ def test_store_read_lock_and_write_permission_failures_are_safe(
     monkeypatch.undo()
 
     monkeypatch.setattr(
-        project_trust_module,
-        "_lock",
+        durable_store_module,
+        "_lock_file",
         lambda _handle: (_ for _ in ()).throw(ProjectTrustError("lock denied")),
     )
     with pytest.raises(ProjectTrustError, match="lock"):
@@ -693,7 +694,7 @@ def test_store_read_lock_and_write_permission_failures_are_safe(
     monkeypatch.undo()
 
     monkeypatch.setattr(
-        project_trust_module.tempfile,
+        durable_store_module.tempfile,
         "mkstemp",
         lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("write denied")),
     )
@@ -749,7 +750,7 @@ def test_combined_commit_and_recovery_failures_remain_fail_closed(
     store.set(key, "untrusted")
     prior = store.path.read_bytes()
 
-    real_fsync_directory = project_trust_module._fsync_directory
+    real_fsync_directory = durable_store_module._fsync_directory
     directory_syncs = 0
 
     def fail_target_directory_sync(directory: Path) -> None:
@@ -759,7 +760,7 @@ def test_combined_commit_and_recovery_failures_remain_fail_closed(
             raise OSError("post-replace directory fsync")
         real_fsync_directory(directory)
 
-    monkeypatch.setattr(project_trust_module, "_fsync_directory", fail_target_directory_sync)
+    monkeypatch.setattr(durable_store_module, "_fsync_directory", fail_target_directory_sync)
     if recovery_operation == "unlink":
         real_unlink = Path.unlink
 
@@ -770,14 +771,14 @@ def test_combined_commit_and_recovery_failures_remain_fail_closed(
 
         monkeypatch.setattr(Path, "unlink", fail_pending_unlink)
     else:
-        real_atomic_replace = store._atomic_replace
+        real_atomic_replace = store._store._atomic_replace
 
         def fail_rollback(destination: Path, data: bytes, *, prefix: str) -> None:
-            if prefix == ".trust-rollback-":
+            if prefix == ".durable-rollback-":
                 raise OSError(f"rollback {recovery_operation}")
             real_atomic_replace(destination, data, prefix=prefix)
 
-        monkeypatch.setattr(store, "_atomic_replace", fail_rollback)
+        monkeypatch.setattr(store._store, "_atomic_replace", fail_rollback)
 
     with pytest.raises(ProjectTrustError, match="recovery failed"):
         store.set(key, "trusted")
