@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 import httpx
+
+_DISTRIBUTION_NAME = "tau-ai"
+_UNKNOWN_VERSION = "0+unknown"
 
 _PROXY_ENV_VARS = (
     "HTTP_PROXY",
@@ -17,6 +21,19 @@ _PROXY_ENV_VARS = (
     "https_proxy",
     "all_proxy",
 )
+
+
+def tau_user_agent() -> str:
+    """Return Tau's self-identifying User-Agent, e.g. ``tau/1.2.3``.
+
+    Relays like OpenCode require clients to identify themselves with their own
+    user agent rather than a generic SDK or HTTP-library name.
+    """
+
+    try:
+        return f"tau/{version(_DISTRIBUTION_NAME)}"
+    except PackageNotFoundError:
+        return f"tau/{_UNKNOWN_VERSION}"
 
 
 def normalize_proxy_url(proxy_url: str) -> str:
@@ -63,10 +80,16 @@ def normalized_proxy_environment() -> Iterator[None]:
 
 
 def create_async_client(**kwargs: Any) -> httpx.AsyncClient:
-    """Create an ``httpx.AsyncClient`` with Tau's proxy normalization applied."""
+    """Create an ``httpx.AsyncClient`` with Tau's defaults applied.
 
+    The proxy normalization and the self-identifying ``User-Agent`` are set as
+    defaults; caller-supplied ``headers`` win over them.
+    """
+
+    default_headers = dict(kwargs.pop("headers", None) or {})
+    default_headers.setdefault("User-Agent", tau_user_agent())
     with normalized_proxy_environment():
-        return httpx.AsyncClient(**kwargs)
+        return httpx.AsyncClient(**kwargs, headers=default_headers)
 
 
 def get_json(url: str, *, timeout: float, follow_redirects: bool = False) -> dict[str, object]:

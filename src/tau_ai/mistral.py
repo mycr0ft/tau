@@ -38,6 +38,7 @@ from tau_ai.env import OpenAICompatibleConfig
 from tau_ai.events import AssistantMessageEvent
 from tau_ai.http import create_async_client
 from tau_ai.http_errors import provider_http_error_message
+from tau_ai.opencode_affinity import merge_opencode_session_headers
 from tau_ai.provider import CancellationToken
 from tau_ai.retry import (
     RETRYABLE_TRANSPORT_ERRORS,
@@ -79,9 +80,13 @@ class MistralConversationsProvider:
         session_id: str | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one response as Pi-compatible assistant message events."""
-        del session_id
         raw = self._stream_provider_events(
-            model=model, system=system, messages=messages, tools=tools, signal=signal
+            model=model,
+            system=system,
+            messages=messages,
+            tools=tools,
+            signal=signal,
+            session_id=session_id,
         )
         return canonicalize_provider_stream(
             raw, api="mistral-conversations", provider="mistral", model=model
@@ -95,6 +100,7 @@ class MistralConversationsProvider:
         messages: list[AgentMessage],
         tools: list[AgentTool],
         signal: CancellationToken | None = None,
+        session_id: str | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         """Stream one Mistral response as provider-neutral events."""
         payload = _build_mistral_payload(
@@ -111,6 +117,7 @@ class MistralConversationsProvider:
             url=f"{_mistral_base_url(self._config.base_url)}/chat/completions",
             payload=payload,
             signal=signal,
+            session_id=session_id,
         )
 
     def _stream(
@@ -120,6 +127,7 @@ class MistralConversationsProvider:
         url: str,
         payload: Mapping[str, JSONValue],
         signal: CancellationToken | None,
+        session_id: str | None = None,
     ) -> AsyncIterator[ProviderEvent]:
         async def iterator() -> AsyncIterator[ProviderEvent]:
             client = self._get_client()
@@ -127,6 +135,7 @@ class MistralConversationsProvider:
                 **dict(self._config.headers or {}),
                 "Authorization": f"Bearer {self._config.api_key}",
             }
+            merge_opencode_session_headers(headers, self._config.provider_name, url, session_id)
             attempt = 0
             while True:
                 parser = _MistralStreamParser()
