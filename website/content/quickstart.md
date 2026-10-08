@@ -153,3 +153,5 @@ More in [Print mode & scripting]({{< relref "./guides/print-mode.md" >}}).
 - **[The interactive session]({{< relref "./guides/tui.md" >}})** — get fluent in the TUI.
 - **[Providers & models]({{< relref "./guides/providers-and-models.md" >}})** — switch models,
   add providers, use local models.
+- **[Tool approvals & the path jail]({{< relref "./guides/tool-approvals.md" >}})** — make Tau
+  ask before sensitive tool calls run.
