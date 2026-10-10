@@ -110,6 +110,7 @@ class Profile:
     thinking_level: str | None = None
     tools: ToolPolicy = field(default_factory=ToolPolicy)
     tool_approval_jail: PathJail | None = None
+    tool_approval_enforce: bool = False
     auto_compact_enabled: bool | None = None
 
     @property
@@ -209,6 +210,11 @@ class ProfileStore:
         approval_data = data.get("toolApproval")
         jail_data = approval_data.get("jail") if isinstance(approval_data, dict) else None
         jail = PathJail.from_json(jail_data)
+        enforce = (
+            approval_data.get("enforceBash", False) if isinstance(approval_data, dict) else False
+        )
+        if not isinstance(enforce, bool):
+            raise ProfileError(f"Profile {name!r} toolApproval.enforceBash must be a boolean")
 
         if tools.deny and tools.allow:
             overlap = set(tools.allow) & set(tools.deny)
@@ -223,6 +229,7 @@ class ProfileStore:
             thinking_level=thinking,
             tools=tools,
             tool_approval_jail=jail if jail.active else None,
+            tool_approval_enforce=enforce,
             auto_compact_enabled=auto_compact,
         )
 
@@ -239,8 +246,14 @@ class ProfileStore:
         if "tools" in values and values["tools"] is not None:
             manifest_data["tools"] = _tool_policy_json(values["tools"])
         jail = values.get("tool_approval_jail")
+        enforce = values.get("tool_approval_enforce")
+        approval_manifest: dict[str, Any] = {}
         if isinstance(jail, PathJail) and jail.active:
-            manifest_data["toolApproval"] = {"jail": jail.to_json()}
+            approval_manifest["jail"] = jail.to_json()
+        if enforce:
+            approval_manifest["enforceBash"] = True
+        if approval_manifest:
+            manifest_data["toolApproval"] = approval_manifest
 
         directory.mkdir(parents=True, exist_ok=False)
         (directory / PROFILE_MANIFEST).write_text(

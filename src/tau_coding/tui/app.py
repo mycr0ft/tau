@@ -9127,7 +9127,10 @@ async def run_tui_app(
                 ),
                 tool_approval=(
                     ToolApprovalConfig(
-                        jail=ProfileStore().get(profile_root.name).tool_approval_jail
+                        jail=ProfileStore().get(profile_root.name).tool_approval_jail,
+                        enforce_bash=(
+                            ProfileStore().get(profile_root.name).tool_approval_enforce
+                        ),
                     )
                     if profile_root is not None
                     and ProfileStore().get(profile_root.name).tool_approval_jail is not None

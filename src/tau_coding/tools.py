@@ -166,6 +166,7 @@ def create_coding_tools(
     cwd: str | Path | None = None,
     shell_command_prefix: str | None = None,
     image_support: ImageSupportState | None = None,
+    shell_enforce_prefix: tuple[str, ...] | None = None,
 ) -> list[AgentTool]:
     """Create the default coding-tool set for a local project.
 
@@ -174,14 +175,20 @@ def create_coding_tools(
     is omitted, the process current working directory at factory-call time is
     used. The tools share per-path write/edit locks within this process so
     concurrent mutations of the same file do not interleave. When configured,
-    `shell_command_prefix` is prepended to every bash tool command.
+    `shell_command_prefix` is prepended to every bash tool command and
+    `shell_enforce_prefix` argv is prepended ahead of it (kernel confinement
+    for bash children; the approval module supplies it when configured).
     """
     root = Path.cwd() if cwd is None else Path(cwd)
     return [
         create_read_tool(cwd=root, image_support=image_support),
         create_write_tool(cwd=root),
         create_edit_tool(cwd=root),
-        create_bash_tool(cwd=root, shell_command_prefix=shell_command_prefix),
+        create_bash_tool(
+            cwd=root,
+            shell_command_prefix=shell_command_prefix,
+            enforce_prefix=shell_enforce_prefix,
+        ),
     ]
 
 
@@ -589,6 +596,7 @@ def create_bash_tool_definition(
     *,
     cwd: str | Path | None = None,
     shell_command_prefix: str | None = None,
+    enforce_prefix: tuple[str, ...] | None = None,
 ) -> ToolDefinition:
     """Create a definition for the `bash` tool.
 
@@ -623,7 +631,20 @@ def create_bash_tool_definition(
             raise ToolInputError("Command cancelled")
 
         start = monotonic()
-        if os.name == "posix":
+        if enforce_prefix:
+            # Kernel-confinement exec-bridge: the launcher argv is [env,
+            # python, -m tau_coding._landlock, SPEC] and it applies the
+            # ruleset then execs everything appended here (the user command).
+            argv = [*enforce_prefix, "bash", "-c", shell_command]
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=root,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=os.name == "posix",
+            )
+        elif os.name == "posix":
             process = await asyncio.create_subprocess_shell(
                 shell_command,
                 cwd=root,
@@ -738,11 +759,13 @@ def create_bash_tool(
     *,
     cwd: str | Path | None = None,
     shell_command_prefix: str | None = None,
+    enforce_prefix: tuple[str, ...] | None = None,
 ) -> AgentTool:
     """Create an `AgentTool` for executing shell commands with captured output."""
     return create_bash_tool_definition(
         cwd=cwd,
         shell_command_prefix=shell_command_prefix,
+        enforce_prefix=enforce_prefix,
     ).to_agent_tool()
 
 

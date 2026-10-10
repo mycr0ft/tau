@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import string
+import sys
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -344,6 +345,29 @@ class _PendingMessageWrite:
 
     message: AgentMessage
     entry: MessageEntry | CustomMessageEntry
+
+
+def _bash_enforcement_prefix(
+    approval: ToolApprovalConfig | None, cwd: Path
+) -> tuple[str, ...] | None:
+    """Return the Landlock launcher argv for bash children, or None.
+
+    Enabled by ``approval.enforce_bash`` with an active jail. Unavailable
+    environments (no py-landlock, unsupported kernel, non-POSIX) degrade to
+    None — approval-only — never an error.
+    """
+    if approval is None or not approval.enforce_bash or sys.platform == "win32":
+        return None
+    jail = approval.jail
+    if jail is None or not jail.active:
+        return None
+    from tau_coding._landlock import EnforcePolicy, launcher_command
+
+    policy = EnforcePolicy(include_cwd_read=True, network="deny")
+    argv = launcher_command(jail, policy=policy, python_path=sys.executable)
+    if argv is None:
+        return None
+    return tuple(argv)
 
 
 @dataclass(frozen=True, slots=True)
@@ -719,6 +743,7 @@ class CodingSession:
         image_support = ImageSupportState(
             supported=_configured_model_supports_images(config, active_model)
         )
+        enforcement_prefix = _bash_enforcement_prefix(config.tool_approval, config.cwd)
         base_tools = (
             config.tools
             if config.tools is not None
@@ -726,6 +751,7 @@ class CodingSession:
                 cwd=config.cwd,
                 shell_command_prefix=config.shell_command_prefix,
                 image_support=image_support,
+                shell_enforce_prefix=enforcement_prefix,
             )
         )
         tools = extension_runtime.compose_tools(base_tools)
@@ -2545,10 +2571,17 @@ class CodingSession:
             # old one. Run-only overrides are invocation state and survive.
             current = self._config.tool_approval
             assert current is not None
-            merged_approval = replace(merged_approval, jail=profile.tool_approval_jail)
+            merged_approval = replace(
+                merged_approval,
+                jail=profile.tool_approval_jail,
+                enforce_bash=profile.tool_approval_enforce,
+            )
             merged_approval.resolver = current.resolver_for_session()
-        elif profile.tool_approval_jail is not None:
-            merged_approval = ToolApprovalConfig(jail=profile.tool_approval_jail)
+        elif profile.tool_approval_jail is not None or profile.tool_approval_enforce:
+            merged_approval = ToolApprovalConfig(
+                jail=profile.tool_approval_jail,
+                enforce_bash=profile.tool_approval_enforce,
+            )
         self._config_before_profile_switch = self._config
         self._config = replace(
             self._config,
@@ -2715,6 +2748,9 @@ class CodingSession:
                 cwd=self._config.cwd,
                 shell_command_prefix=self._config.shell_command_prefix,
                 image_support=self._image_support,
+                shell_enforce_prefix=_bash_enforcement_prefix(
+                    self._config.tool_approval, self._config.cwd
+                ),
             )
         )
         staged_tools = staged_runtime.compose_tools(base_tools)

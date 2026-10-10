@@ -597,7 +597,11 @@ def main(
             if paths
             else None
         )
-        tool_approval = ToolApprovalConfig(jail=gate_jail, run_override=tool_run_override)
+        tool_approval = ToolApprovalConfig(
+            jail=gate_jail,
+            run_override=tool_run_override,
+            enforce_bash=bool(getattr(profile_data, "tool_approval_enforce", False)),
+        )
 
     # Approval-gate preset: the profile manifest supplies the jail; explicit
     # CLI flags override per-field. A gate config exists when either source

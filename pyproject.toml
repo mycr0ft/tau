@@ -31,6 +31,9 @@ Issues = "https://github.com/huggingface/tau/issues"
 [project.scripts]
 tau = "tau_coding.cli:app"
 
+[project.optional-dependencies]
+landlock = ["py-landlock>=0.1"]
+
 [dependency-groups]
 dev = [
     "mypy>=1.10",

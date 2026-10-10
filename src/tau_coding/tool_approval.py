@@ -562,6 +562,13 @@ class ToolApprovalConfig:
     store: ApprovalStore | None = None
     requester: Requester | None = None
     run_override: RunOverride | None = None
+    enforce_bash: bool = False
+    """When True, bash children run inside a Landlock ruleset (Linux only).
+
+    Degrades to approval-only with a diagnostic wherever py-landlock or the
+    kernel is missing. Enforcement is a hardening layer for the jail, never
+    its replacement.
+    """
     resolver: ApprovalDecisionResolver | None = None
 
     def resolver_for_session(self) -> ApprovalDecisionResolver:
