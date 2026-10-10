@@ -114,3 +114,33 @@ async def test_approval_modal_lists_all_choices_for_pathbound(tmp_path: Path) ->
         await pilot.press("enter")  # select allow-save
         await pilot.pause()
     assert host.results == ["allow-save"]
+
+
+@pytest.mark.anyio
+async def test_real_app_routes_arrow_keys_into_modal() -> None:
+    """App-level priority Up/Down bindings must reach the approval modal."""
+    from tau_coding.tui.app import TauTuiApp
+    from test_tui_app import FakeSession
+
+    request = _request()
+    app = TauTuiApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        worker = app.run_worker(app.prompt_tool_approval(request), exclusive=False)
+        await pilot.pause()
+        await pilot.pause()
+        # Down then Up must move the ListView cursor (not move the prompt
+        # cursor); Enter then selects allow-once (index 0).
+        await pilot.press("down")
+        await pilot.pause()
+        from textual.widgets import ListView
+
+        item = app.screen.query_one("#tool-approval-list", ListView)
+        assert item.index == 1, f"down did not move modal cursor: {item.index}"
+        await pilot.press("up")
+        await pilot.pause()
+        assert item.index == 0
+        await pilot.press("enter")
+        result = await worker.wait()
+        await pilot.pause()
+    assert result == "allow-once"

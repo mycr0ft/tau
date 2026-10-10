@@ -6552,7 +6552,8 @@ class TauTuiApp(App[None]):
             | LocalChoiceConfirmScreen
             | LocalConfirmScreen
             | LocalSearchResultsScreen
-            | ProjectTrustScreen,
+            | ProjectTrustScreen
+            | ToolApprovalScreen,
         ):
             self.screen.action_select_cursor()
             return
@@ -6596,7 +6597,8 @@ class TauTuiApp(App[None]):
             | LocalChoiceConfirmScreen
             | LocalConfirmScreen
             | LocalSearchResultsScreen
-            | ProjectTrustScreen,
+            | ProjectTrustScreen
+            | ToolApprovalScreen,
         ):
             self.screen.action_cursor_down()
             return
@@ -6635,7 +6637,8 @@ class TauTuiApp(App[None]):
             | LocalChoiceConfirmScreen
             | LocalConfirmScreen
             | LocalSearchResultsScreen
-            | ProjectTrustScreen,
+            | ProjectTrustScreen
+            | ToolApprovalScreen,
         ):
             self.screen.action_cursor_up()
             return
