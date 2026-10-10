@@ -426,6 +426,15 @@ wheels = [
 ]
 
 [[package]]
+name = "py-landlock"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/aa/6dc19aa2393cf4d2288fe3647ade6308d66c2deb233e40e592ddce7c6330/py_landlock-0.1.1.tar.gz", hash = "sha256:917e83917ea8932c1f106b62e82874542094738143600b77dbccd88deabc5656", size = 16210, upload-time = "2026-01-11T15:10:16.372Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/f5/53515e4b743ee4d07e37aedfb4bc30c2185b48bd96df44a9fbbef3f3c610/py_landlock-0.1.1-py3-none-any.whl", hash = "sha256:a4dd8dad2032edeb6974031d10be8758acf6c9747ab18616921a03779d97e404", size = 16602, upload-time = "2026-01-11T15:10:17.056Z" },
+]
+
+[[package]]
 name = "pydantic"
 version = "2.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -612,6 +621,11 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+landlock = [
+    { name = "py-landlock" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
@@ -625,12 +639,14 @@ requires-dist = [
     { name = "httpx", extras = ["socks"], specifier = ">=0.27" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pillow", specifier = ">=11.0" },
+    { name = "py-landlock", marker = "extra == 'landlock'", specifier = ">=0.1" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pygments", specifier = ">=2.18" },
     { name = "rich", specifier = ">=13.0" },
     { name = "textual", specifier = ">=8.2.8" },
     { name = "typer", specifier = ">=0.12" },
 ]
+provides-extras = ["landlock"]
 
 [package.metadata.requires-dev]
 dev = [
