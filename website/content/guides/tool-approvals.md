@@ -176,8 +176,9 @@ read-write on the jailed trees and `/tmp`/`/dev`, all outbound TCP denied.
 A command that tries to leave — `ls ~`, `cat ~/.ssh/...`, a silent upload —
 fails with the kernel's Permission denied instead of a dialog, on every
 descendant process, without any prompt. Requires Linux 5.13+ and the
-optional `landlock` extra (`uv tool install tau-ai --extra landlock`);
-everywhere else the gate degrades to approval-only. Enforcement narrows
+optional `landlock` extra (`uv tool install tau-ai --with py-landlock`;
+`uv tool install` has no `--extra` flag); everywhere else the gate degrades
+to approval-only. Enforcement narrows
 what a bash child can touch; it is still not a full sandbox (TCP is
 all-or-none per ruleset, and non-Linux hosts get the gate only).
 
