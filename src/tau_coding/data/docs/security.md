@@ -61,9 +61,11 @@ the reason delivered to the model. `--approve-tools` and `--no-approve-tools`
 are run-only overrides. A profile manifest may carry the jail as a preset
 (`toolApproval.jail`: paths plus reads/writes-outside policy), so a hardened
 setup ships as one profile; `/approvals` lists saved rules and run-scoped
-decisions, and `/approvals remove N` deletes saved rule N. The gate is an
-application-layer choke point, not a filesystem, process, network, or
-exfiltration sandbox.
+decisions, and `/approvals remove N` deletes saved rule N. Optionally (`toolApproval.enforceBash`) bash children run inside a Linux
+Landlock ruleset limiting them to system reads plus the jailed trees, with
+outbound TCP denied; hosts without kernel support or the optional
+`landlock` extra run approval-only. These are application/namespace
+controls, not a full filesystem, process, network, or exfiltration sandbox.
 
 ## General boundary
 

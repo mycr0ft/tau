@@ -165,6 +165,33 @@ enforces. Keep the container's `TAU_HOME` separate from your workstation's so
 decisions made under different rules never share one store.
 {{% /tip %}}
 
+## 7. Kernel-enforced mode
+
+The jail is a policy (the gate asks); it can also be a kernel wall. Add
+`"enforceBash": true` next to `jail` in a profile manifest and every bash
+command runs inside a Linux
+[Landlock](https://docs.kernel.org/userspace-api/landlock.html) ruleset:
+reads and execution on system paths (plus `/etc` for resolver config),
+read-write on the jailed trees and `/tmp`/`/dev`, all outbound TCP denied.
+A command that tries to leave — `ls ~`, `cat ~/.ssh/...`, a silent upload —
+fails with the kernel's Permission denied instead of a dialog, on every
+descendant process, without any prompt. Requires Linux 5.13+ and the
+optional `landlock` extra (`uv tool install tau-ai --extra landlock`);
+everywhere else the gate degrades to approval-only. Enforcement narrows
+what a bash child can touch; it is still not a full sandbox (TCP is
+all-or-none per ruleset, and non-Linux hosts get the gate only).
+
+Add it to the CUI profile:
+
+```json
+{
+  "toolApproval": {
+    "jail": { "paths": ["~/work/cui-root"], "writesOutside": "deny" },
+    "enforceBash": true
+  }
+}
+```
+
 ## What you will see in the transcript
 
 Every decision lands as a persistent transcript row (search them later, as
