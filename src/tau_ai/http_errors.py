@@ -22,8 +22,8 @@ def provider_http_error_message(
         prefix = f"{prefix} for model {model}"
     detail = provider_http_error_detail(body)
     if detail:
-        return f"{prefix}: {detail}"
-    return prefix
+        return f"{prefix}: {detail}{opencode_free_tier_hint(detail)}"
+    return f"{prefix}{opencode_free_tier_hint(body)}"
 
 
 def provider_http_error_detail(body: str) -> str:
@@ -34,6 +34,26 @@ def provider_http_error_detail(body: str) -> str:
         if detail:
             return detail
     return body.strip()[:_MAX_ERROR_DETAIL_LENGTH]
+
+
+_FREE_TIER_MESSAGE_FRAGMENT = "free tier can only be used from within opencode"
+
+
+def opencode_free_tier_hint(detail: str) -> str:
+    """Return Tau's guidance appended to OpenCode free-tier gate rejections.
+
+    The relay 403s free-tier models from third-party clients on a header
+    fingerprint (opencode issue 49433); the raw message alone reads like a
+    bug. The hint stays factual and points at sanctioned alternatives.
+    """
+    if _FREE_TIER_MESSAGE_FRAGMENT not in detail.casefold():
+        return ""
+    return (
+        " Tau note: this model is on OpenCode's free tier, which the relay "
+        "currently gates to the official OpenCode client (their issue 49433); "
+        "Tau requests are refused by policy, not a header bug. Pick a paid "
+        "model on the same provider, or another provider."
+    )
 
 
 def provider_error_detail_from_mapping(value: Mapping[str, Any]) -> str:

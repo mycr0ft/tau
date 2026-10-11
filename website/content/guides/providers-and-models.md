@@ -166,6 +166,11 @@ needed. Available models and plan limits change over time; consult the
 [OpenCode Go](https://opencode.ai/docs/go) and
 [OpenCode Zen](https://opencode.ai/docs/zen) pages for the current list.
 
+Free-tier models (`-free` / `:free` catalog names) are gated by the relay to
+the official OpenCode client and fail with a 403 from Tau; the `model` picker
+marks them and refuses selection, and the error message explains the policy
+when one is attempted directly (see anomalyco/opencode#49433).
+
 ### Z.AI
 
 Log in with `/login zai` or set `ZAI_API_KEY`. Tau sends Z.AI's provider-specific

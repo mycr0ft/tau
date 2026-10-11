@@ -3353,6 +3353,15 @@ class ModelPickerScreen(ModalScreen[ModelChoice | None]):
             return
         if choice in self.unavailable_choices:
             return
+        if _is_opencode_free_tier_model(choice.provider_name, choice.model):
+            # Keep the picker open with an explainable refusal instead of
+            # dismissing into a guaranteed relay 403.
+            help_line = self.query_one("#model-picker-help", Static)
+            help_line.update(
+                "Free-tier models are gated to the official OpenCode client; "
+                "pick a paid model or another provider."
+            )
+            return
         self.cancel_refresh()
         self.dismiss(choice)
 
@@ -8475,6 +8484,22 @@ def _theme_picker_label(theme_name: TuiThemeName, *, current_theme: TuiThemeName
     return f"{marker} {theme_name}"
 
 
+_FREE_TIER_PROVIDER_IDS = frozenset({"opencode", "opencode-go", "opencode-zen"})
+
+
+def _is_opencode_free_tier_model(provider_name: str, model: str) -> bool:
+    """True for OpenCode catalog models whose tier the relay gates to official clients.
+
+    Detection is name-based (``-free`` suffix or ``free`` component) over the
+    OpenCode provider ids; the relay 403s these from third-party clients
+    regardless of headers (opencode issue 49433), so the picker warns.
+    """
+    if (provider_name or "").strip().casefold() not in _FREE_TIER_PROVIDER_IDS:
+        return False
+    lowered = model.casefold()
+    return lowered.endswith("-free") or lowered.endswith(":free") or ".free" in lowered
+
+
 def _model_picker_label(
     choice: ModelChoice,
     *,
@@ -8488,7 +8513,12 @@ def _model_picker_label(
         if (choice.provider_name == current_provider and choice.model == current_model)
         else "  "
     )
-    suffix = (" [scoped]" if scoped else "") + (" [unavailable]" if unavailable else "")
+    free_tier = _is_opencode_free_tier_model(choice.provider_name, choice.model)
+    suffix = (
+        (" [scoped]" if scoped else "")
+        + (" [free tier: official OpenCode client required]" if free_tier else "")
+        + (" [unavailable]" if unavailable else "")
+    )
     return f"{marker}{choice.provider_name}:{choice.model}{suffix}"
 
 
