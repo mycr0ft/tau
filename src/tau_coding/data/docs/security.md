@@ -63,8 +63,10 @@ are run-only overrides. A profile manifest may carry the jail as a preset
 setup ships as one profile; `/approvals` lists saved rules and run-scoped
 decisions, and `/approvals remove N` deletes saved rule N. Optionally (`toolApproval.enforceBash`) bash children run inside a Linux
 Landlock ruleset limiting them to system reads plus the jailed trees, with
-outbound TCP denied; hosts without kernel support or the optional
-`landlock` extra run approval-only. These are application/namespace
+outbound TCP denied; macOS compiles a Seatbelt profile for
+`sandbox-exec` (writes and network enforced; reads broad minus credential
+homes). Hosts without kernel support or the optional `landlock` extra run
+approval-only. These are application/namespace
 controls, not a full filesystem, process, network, or exfiltration sandbox.
 
 ## General boundary

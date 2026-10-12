@@ -175,7 +175,13 @@ reads and execution on system paths (plus `/etc` for resolver config),
 read-write on the jailed trees and `/tmp`/`/dev`, all outbound TCP denied.
 A command that tries to leave — `ls ~`, `cat ~/.ssh/...`, a silent upload —
 fails with the kernel's Permission denied instead of a dialog, on every
-descendant process, without any prompt. Requires Linux 5.13+ and the
+descendant process, without any prompt. without any prompt. On macOS, the same profile manifest generates a
+Seatbelt ruleset instead: writes and outbound network are kernel-enforced
+exactly the same way; reads are broader on macOS (system trees the dynamic
+linker needs) with an explicit deny on credential homes like `~/.ssh`,
+`~/.aws`, and `~/.tau`. Apple deprecates `sandbox-exec` (it prints a
+banner on every run, which Tau strips from tool output); it still ships
+and remains what major agent CLIs use. Requires Linux 5.13+ and the
 optional `landlock` extra (`uv tool install tau-ai --with py-landlock`;
 `uv tool install` has no `--extra` flag); everywhere else the gate degrades
 to approval-only. Enforcement narrows
