@@ -632,9 +632,10 @@ def create_bash_tool_definition(
 
         start = monotonic()
         if enforce_prefix:
-            # Kernel-confinement exec-bridge: the launcher argv is [env,
-            # python, -m tau_coding._landlock, SPEC] and it applies the
-            # ruleset then execs everything appended here (the user command).
+            # Kernel-confinement exec-chain: Linux prepends the Landlock
+            # exec-bridge ([/usr/bin/env, python, -m tau_coding._landlock,
+            # SPEC]); macOS prepends sandbox-exec with a generated profile.
+            # Both apply policy in-process before user code runs.
             argv = [*enforce_prefix, "bash", "-c", shell_command]
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -669,6 +670,12 @@ def create_bash_tool_definition(
         )
 
         output = output_bytes.decode(errors="replace")
+        if enforce_prefix:
+            # sandbox-exec prints Apple's static deprecation banner on every
+            # run; strip the exact lines so transcripts aren't polluted.
+            from tau_coding._seatbelt import strip_sandbox_exec_banner
+
+            output = strip_sandbox_exec_banner(output)
         truncation = truncate_tail(output)
         full_output_path: str | None = None
         output_text = truncation.content or "(no output)"

@@ -350,21 +350,29 @@ class _PendingMessageWrite:
 def _bash_enforcement_prefix(
     approval: ToolApprovalConfig | None, cwd: Path
 ) -> tuple[str, ...] | None:
-    """Return the Landlock launcher argv for bash children, or None.
+    """Return the enforcement launcher argv for bash children, or None.
 
-    Enabled by ``approval.enforce_bash`` with an active jail. Unavailable
-    environments (no py-landlock, unsupported kernel, non-POSIX) degrade to
-    None — approval-only — never an error.
+    Enabled by ``approval.enforce_bash`` with an active jail, dispatched by
+    platform: Linux uses the Landlock exec-bridge, macOS generates a
+    Seatbelt profile for ``sandbox-exec``. Unavailable environments degrade
+    to None — approval-only — never an error.
     """
     if approval is None or not approval.enforce_bash or sys.platform == "win32":
         return None
     jail = approval.jail
     if jail is None or not jail.active:
         return None
-    from tau_coding._landlock import EnforcePolicy, launcher_command
+    from tau_coding._landlock import EnforcePolicy
+    from tau_coding._seatbelt import launcher_command as seatbelt_launcher_command
 
     policy = EnforcePolicy(include_cwd_read=True, network="deny")
-    argv = launcher_command(jail, policy=policy, python_path=sys.executable)
+    launcher = seatbelt_launcher_command if sys.platform == "darwin" else None
+    if launcher is None:
+        from tau_coding._landlock import launcher_command as landlock_launcher_command
+
+        argv = landlock_launcher_command(jail, policy=policy, python_path=sys.executable)
+    else:
+        argv = launcher(jail, policy=policy, python_path=sys.executable)
     if argv is None:
         return None
     return tuple(argv)

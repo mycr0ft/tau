@@ -56,8 +56,9 @@ components, all optional and none load-bearing for stages 1–3.
   restrict-then-exec (a tiny launcher restricts its own thread and
   `os.execv`s bash, so the child inherits rules without touching Tau's asyncio
   threads; `preexec_fn` is thread-unsafe and must not be used). Linux 5.13+
-  only (TCP net rules need ABI 4/6.7+, IPC scoping ABI 6/6.12+); macOS falls
-  back to a Seatbelt `shell_command_prefix` recipe, Windows to nothing. Ship
+  only (TCP net rules need ABI 4/6.7+, IPC scoping ABI 6/6.12+); macOS compiles a
+  Seatbelt profile for sandbox-exec (`tau_coding/_seatbelt.py`), Windows to
+  nothing. Ship
   as an optional extra with `supported()` probing and graceful degradation to
   approval-only — never silently require it.
 - **bubblewrap-bin** ships a prebuilt `bwrap` binary for environments where
@@ -372,3 +373,29 @@ behavior.
 - TUI pilots: modal renders bounded summary, escape deny, allow-run session
   rule applied to a later identical call, persistent choices absent for device
   vectors, transcript rows persist after dismissal, busy spinner remains live.
+
+## Seatbelt backend (macOS)
+
+`tau_coding/_seatbelt.py` mirrors `_landlock.py`: same `PathJail` +
+shared `EnforcePolicy`, profile text compiled in `build_seatbelt_profile`,
+cached per content hash in the process temp dir, launcher
+`launcher_command(jail, policy=..., python_path=...)` returns
+`[sandbox-exec, -f, profile]` or `None` (degrade). Dispatch is
+platform-keyed in `session._bash_enforcement_prefix` (darwin -> seatbelt,
+else landlock, win32 -> None).
+
+Semantic divergence from Linux, deliberate: reads are broad (`deny
+default` tier + system trees the dynamic linker requires) with `deny`
+rules for `$HOME` plus the credential sub-trees (`.ssh`, `.aws`,
+`.config/gcloud`, `.netrc`, `.tau`, `Library/Keychains`); the tau tool
+interpreter prefix and the jail paths are re-allowed AFTER the deny
+(SBPL honours rule order, later rules win). Writes/jail/tmp/dev and
+outbound network match Landlock exactly. Apple prints a two-line
+deprecation banner per invocation; `strip_sandbox_exec_banner` (exact
+line match) removes it under enforcement in the bash tool.
+
+Live tests: `tests/test_seatbelt_enforcement.py::TestLiveConfinement`
+runs on a Mac (7 in-vivo assertions: home read/write blocked, net
+blocked, descendant confined, jail write ok, system python runs, banner
+stripped). Acceptance on a new macOS release = run that file and compare
+against the assertions.
