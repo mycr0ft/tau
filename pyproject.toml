@@ -65,6 +65,12 @@ packages = ["tau_ai", "tau_agent", "tau_coding"]
 module = "pygments.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# py-landlock is an optional extra (pip install tau[landlock]); the import in
+# _landlock.py is guarded at runtime, so the type checker must not require it.
+module = "py_landlock.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
