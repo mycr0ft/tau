@@ -198,7 +198,12 @@ def test_tui_state_groups_adjacent_reads_from_one_assistant_message() -> None:
     assert [member.tool_call_id for member in item.grouped_tool_calls] == ["call-1", "call-2"]
     assert state.find_tool_item("call-1") is item
     assert state.find_tool_item("call-2") is item
-    assert state.resolve_tool_invocation(item, expanded=True) == "→ read a.py\n→ read b.py"
+    # Collapsed, the widget falls back to the compact path list.
+    assert state.resolve_tool_invocation(item, expanded=False) is None
+    # Expanding a read run shows each member's previewed result, like edits.
+    assert state.resolve_tool_invocation(item, expanded=True) == (
+        "→ read a.py\n\n✓ read\none\n\n→ read b.py\n\n✓ read\ntwo"
+    )
     assert item.tool_result_text == "✓ read group"
 
 
@@ -628,7 +633,8 @@ def test_tui_adapter_does_not_group_reads_separated_by_assistant_text() -> None:
     assert [item.text for item in state.items] == ["then", "→ read a.py", "→ read b.py"]
 
 
-def test_tui_state_does_not_group_reads_from_different_assistant_messages() -> None:
+def test_tui_state_groups_reads_from_tool_only_messages() -> None:
+    """Read runs continue across tool-only messages, like every other tool."""
     state = TuiState()
     state.load_messages(
         [
@@ -643,7 +649,75 @@ def test_tui_state_does_not_group_reads_from_different_assistant_messages() -> N
         ]
     )
 
-    assert [item.text for item in state.items] == ["→ read a.py", "→ read b.py"]
+    assert len(state.items) == 1
+    item = state.items[0]
+    assert item.text == "→ Read 2 files\n  - a.py\n  - b.py"
+    assert item.grouped_tool_calls is not None
+    assert [member.tool_call_id for member in item.grouped_tool_calls] == ["call-1", "call-2"]
+    assert state.find_tool_item("call-2") is item
+
+
+@pytest.mark.parametrize("tool_name", ["read", "edit", "write"])
+@pytest.mark.parametrize("streaming", [False, True], ids=["restored", "streamed"])
+def test_nested_file_groups_count_toward_tool_run_limit(
+    monkeypatch: pytest.MonkeyPatch, tool_name: str, streaming: bool
+) -> None:
+    monkeypatch.setattr("tau_coding.tui.state.TOOL_RUN_ROW_LIMIT", 5)
+    prefix_tool = "edit" if tool_name == "write" else "write"
+    rounds = [
+        AssistantMessage(
+            content=[
+                ToolCall(id="prefix-1", name=prefix_tool, arguments={"path": "a.py"}),
+                ToolCall(id="prefix-2", name=prefix_tool, arguments={"path": "b.py"}),
+                ToolCall(id="bash", name="bash", arguments={"command": "pwd"}),
+                ToolCall(id="c0", name=tool_name, arguments={"path": "f0.py"}),
+            ]
+        ),
+        *[
+            AssistantMessage(
+                content=[
+                    ToolCall(id=f"c{index}", name=tool_name, arguments={"path": f"f{index}.py"})
+                ]
+            )
+            for index in range(1, 4)
+        ],
+    ]
+    state = TuiState()
+    adapter = TuiEventAdapter(state)
+    messages: list[AssistantMessage | ToolResultMessage] = []
+    for message in rounds:
+        messages.append(message)
+        if streaming:
+            adapter.apply(MessageStartEvent(message=AssistantMessage()))
+            adapter.apply(MessageEndEvent(message=message))
+        for call in message.tool_calls:
+            messages.append(
+                ToolResultMessage(tool_call_id=call.id, tool_name=call.name, content="ok")
+            )
+            if streaming:
+                adapter.apply(
+                    ToolExecutionStartEvent(
+                        tool_call_id=call.id, tool_name=call.name, args=call.arguments
+                    )
+                )
+                adapter.apply(
+                    ToolExecutionEndEvent(
+                        tool_call_id=call.id,
+                        tool_name=call.name,
+                        result=AgentToolResult(content="ok"),
+                        is_error=False,
+                    )
+                )
+    if not streaming:
+        state.load_messages(messages)
+
+    assert len(state.items) == 2
+    first, second = state.items
+    assert state._tool_run_tail(first) == (5, tool_name, {"path": "f1.py"})
+    assert state._tool_run_tail(second) == (2, tool_name, {"path": "f3.py"})
+    assert state.find_tool_item("c1") is first
+    assert state.find_tool_item("c2") is second
+    assert state.find_tool_item("c3") is second
 
 
 def test_tui_adapter_records_tool_progress_and_result() -> None:
@@ -704,6 +778,48 @@ def test_tui_adapter_renders_skill_file_reads_with_skill_style() -> None:
     assert [(item.role, item.text, item.tool_result_text) for item in state.items] == [
         ("skill", "Loading skill: review", "✓ read\n# Review\nFull instructions.")
     ]
+
+
+def test_restoring_many_reads_resolves_each_skill_path_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tau_coding.tui import state as state_module
+
+    skills = tuple(
+        Skill(
+            name=f"skill-{index}",
+            path=Path(f"/workspace/.tau/skills/skill-{index}.md"),
+            content="# Skill",
+            description="Skill",
+        )
+        for index in range(10)
+    )
+    state = TuiState(skills=skills)
+    resolved: list[str] = []
+    original_normalized_path = state_module._normalized_path
+
+    def counting_normalized_path(path: str | Path) -> Path:
+        resolved.append(str(path))
+        return original_normalized_path(path)
+
+    monkeypatch.setattr(state_module, "_normalized_path", counting_normalized_path)
+    reads = [
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id=f"call-{index}",
+                    name="read",
+                    arguments={"path": f"/workspace/.tau/skills/skill-{index % 12}.md"},
+                )
+            ]
+        )
+        for index in range(30)
+    ]
+
+    state.load_messages(reads)
+
+    assert len(resolved) == len(reads) + len(skills)
+    assert sum(item.role == "skill" for item in state.items) == 26
 
 
 def test_tui_adapter_records_retry_and_queue_status() -> None:
@@ -786,6 +902,82 @@ def test_tool_formatters_keep_human_readable_output() -> None:
     assert "line 8" in block
     assert "line 9" not in block
     assert "3 more lines" in block
+
+
+def test_file_tool_formatter_shortens_absolute_paths_under_cwd(tmp_path: Path) -> None:
+    nested = tmp_path / "src" / "app.py"
+    read_call = ToolCall(id="call-1", name="read", arguments={"path": str(nested)})
+    edit_call = ToolCall(id="call-2", name="edit", arguments={"path": str(nested)})
+
+    assert format_tool_call_block(read_call, cwd=tmp_path) == "→ read src/app.py"
+    assert format_tool_call_invocation(read_call, cwd=tmp_path) == "read src/app.py"
+    assert format_tool_call_block(edit_call, cwd=tmp_path) == "→ edit src/app.py"
+    assert format_tool_call_invocation(edit_call, cwd=tmp_path) == "edit src/app.py"
+
+
+def test_file_tool_formatter_leaves_relative_and_outside_paths_unchanged(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / "elsewhere" / "notes.md"
+    relative = ToolCall(id="call-1", name="read", arguments={"path": "README.md"})
+    absolute = ToolCall(id="call-2", name="read", arguments={"path": str(outside)})
+    edit_relative = ToolCall(id="call-3", name="edit", arguments={"path": "README.md"})
+
+    assert format_tool_call_block(relative, cwd=tmp_path) == "→ read README.md"
+    assert format_tool_call_block(absolute, cwd=tmp_path) == f"→ read {outside}"
+    assert format_tool_call_block(edit_relative, cwd=tmp_path) == "→ edit README.md"
+
+
+def test_tui_state_shortens_absolute_file_paths_in_transcript(tmp_path: Path) -> None:
+    state = TuiState(cwd=tmp_path)
+    state.add_tool_call(
+        ToolCall(id="call-1", name="read", arguments={"path": str(tmp_path / "a.py")}),
+    )
+    state.add_tool_call(
+        ToolCall(id="call-2", name="edit", arguments={"path": str(tmp_path / "b.py")}),
+    )
+
+    assert state.items[0].text == "→ read a.py"
+    assert state.items[1].text == "→ edit b.py"
+
+
+def test_tui_state_shortens_absolute_paths_in_grouped_reads_and_edits(tmp_path: Path) -> None:
+    state = TuiState(cwd=tmp_path)
+    state.load_messages(
+        [
+            AssistantMessage(
+                content=[
+                    ToolCall(
+                        id="call-1",
+                        name="read",
+                        arguments={"path": str(tmp_path / "a.py")},
+                    ),
+                    ToolCall(
+                        id="call-2",
+                        name="read",
+                        arguments={"path": str(tmp_path / "b.py")},
+                    ),
+                ]
+            ),
+            AssistantMessage(
+                content=[
+                    ToolCall(
+                        id="call-3",
+                        name="edit",
+                        arguments={"path": str(tmp_path / "c.py")},
+                    ),
+                    ToolCall(
+                        id="call-4",
+                        name="edit",
+                        arguments={"path": str(tmp_path / "d.py")},
+                    ),
+                ]
+            ),
+        ]
+    )
+
+    assert state.items[0].text == "→ Reading 2 files\n  - a.py\n  - b.py"
+    assert state.items[1].text == "→ Editing 2 files\n  - c.py\n  - d.py"
 
 
 def test_bash_tool_formatter_hides_short_command_until_expanded() -> None:

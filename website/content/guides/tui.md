@@ -10,8 +10,10 @@ see [Keyboard shortcuts](/reference/keybindings/).
 ## Sending a prompt
 
 Type into the prompt box at the bottom and press **Enter** to submit. The editor
-keeps its padded block size and background, while a single left border changes
-color to reflect focus, shell mode, and active runs without boxing it in.
+has no highlighted background; thin rules above and below frame it and change
+color to reflect shell mode without boxing it in. While the agent is working,
+the `τ` beside the prompt becomes a gently pulsing braille-dot spinner (`⣾⣽⣻⢿`) and
+returns to `τ` when the run ends.
 **Shift+Enter** inserts a newline for multi-line prompts. If your terminal cannot
 distinguish it from Enter, remap `insert_newline` in `~/.tau/tui.json`; see
 [Keyboard shortcuts](/reference/keybindings/#prompting). Tau streams the
@@ -117,7 +119,7 @@ You can run a shell command yourself without asking the model:
 Shell commands are non-interactive: their stdin is disconnected from the TUI.
 Programs that require an interactive terminal should be run in a separate terminal.
 
-As soon as the input starts with `!`, the whole input and its left border turn
+As soon as the input starts with `!`, the whole input and its top and bottom rules turn
 the same amber/orange color as a tool while it is running, and the `τ` prompt
 prefix becomes a matching `$`, so you can tell at a glance that submitting will
 execute a shell command instead of messaging the model.
@@ -166,14 +168,21 @@ tool row.
 Adjacent built-in tool calls from one model response share one transcript block,
 with one compact line per logical action. Each line retains its own status color,
 and adjacent reads, edits, or writes remain clustered under one headline with
-every file path listed beneath it. Expanded edit and write groups retain each
-invocation and result; expanded read groups omit repeated file contents. The
-complete block remains one selectable text surface,
-including across line boundaries.
-Batches never cross assistant text, thinking, or unrelated responses. Consecutive
-same-tool edit or write continuations are grouped so providers that serialize
-file mutations one at a time still produce one file list. Extension tools, custom
-rendered call cards, and skill loads remain separate.
+every file path listed beneath it. File paths for `read` and `edit` calls are
+displayed relative to the session working directory, even when the model passes
+an absolute path, so the transcript stays compact. Expanded groups retain each
+invocation and result: edit and write rows show their patch or written content,
+and read rows show a preview of each file. The collapsed path list keeps each
+read's line range as `file:start-end`. The complete block remains one selectable
+text surface, including across line boundaries.
+
+Same-tool runs continue across consecutive narration-free responses, so a
+provider that serializes one call at a time still produces one block. Assistant
+text or thinking, a different tool, a failed call, and a new user prompt all end
+the run. A run stops growing after eight rows and the next call starts a fresh
+block. Each file-group member counts toward this limit, including groups inside
+mixed-tool blocks. Extension tools, custom rendered call cards, and skill loads
+remain separate.
 
 Tool results (like long `read` or `bash` output) render as compact previews so
 the transcript stays readable. Tau requires the model to give each `bash` call a
@@ -186,16 +195,16 @@ show the generic `Running shell command` label until expanded.
 
 When one model response reads or edits several files, adjacent calls of the same
 type share one group. The group lists every path, reports progress as results
-arrive, and shows an aggregate failure count when needed. Calls from different
-model responses are never combined; shell calls and extension tools remain
-separate.
+arrive, and shows an aggregate failure count when needed. Consecutive
+narration-free responses continue the same group; shell calls and extension tools
+remain separate.
 
-Toggle grouped reads into their individual call list with **Ctrl+O**. Grouped read
-rows omit file-content previews even when expanded, keeping the transcript focused
-on which files were read. The same toggle reveals exact shell commands and full
-output for other tools. Compaction and grouping affect only the TUI display;
-execution, session history, and print-mode transcripts retain every complete call
-and result.
+Toggle a group into its individual call list with **Ctrl+O**. Expanded read rows
+show each file's preview, so the group still answers what was read instead of
+hiding the contents. The same toggle reveals exact shell commands and full output
+for other tools. Compaction and grouping affect only the TUI display; execution,
+session history, and print-mode transcripts retain every complete call and
+result.
 
 Markdown link hover styling underlines only the linked text, never the rest of its
 row. User message blocks use the same theme background as the prompt field and sidebar,
@@ -319,8 +328,9 @@ a reloaded tool list or thinking level, or that a pause outlived the provider's
 cache.
 Tau hides both figures for providers that do not report cache usage.
 
-The compact status block below the prompt puts `provider:model (thinking)` on its
-first line and provider-anchored active context as `used/limit` on the second. When
+The compact status block below the prompt shows the working directory and Git
+branch on its first line, then `provider:model (thinking)` on the second with
+`used/limit` right-aligned, where `used/limit` is provider-anchored active context. When
 no valid provider usage exists yet, such as immediately after compaction, it shows
 `?/limit` until a fresh response reports usage. Unlike cumulative usage, this
 active count describes the system prompt, tools,

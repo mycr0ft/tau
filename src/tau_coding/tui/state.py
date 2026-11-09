@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -34,9 +35,20 @@ TERMINAL_COMMAND_OUTPUT_PREVIEW_LINES = 120
 # Show live elapsed time on an executing tool row once it stops being instant;
 # quick reads/edits never flash a "(0s)".
 TOOL_TIMER_MIN_SECONDS = 1.0
+# Tools whose same-tool runs continue across tool-only messages, and whose
+# calls batch within one message. Consecutive narration-free steps read better
+# as one block than as one block per call. Every tool takes part, which is only
+# safe because reads are resultful groups below: expanding a read run shows each
+# member's previewed result rather than a path list that hides the file
+# contents the user opened the transcript for.
 BATCHABLE_TOOL_NAMES = frozenset({"bash", "edit", "read", "write"})
 GROUPABLE_FILE_TOOL_NAMES = frozenset({"edit", "read", "write"})
-RESULTFUL_FILE_GROUP_NAMES = frozenset({"edit", "write"})
+# A continued tool run grows inside one mounted item, which the transcript's
+# item window cannot page out and which is re-rendered on every append, so a
+# long run starts a fresh block instead of growing without bound.
+TOOL_RUN_ROW_LIMIT = 8
+# File groups whose members' results render when the group is expanded.
+RESULTFUL_FILE_GROUP_NAMES = frozenset({"edit", "read", "write"})
 
 
 @dataclass(slots=True)
@@ -69,10 +81,10 @@ class ChatItem:
     tool_arguments: dict[str, JSONValue] | None = None
     started_at: float | None = None
     tool_batch_id: int | None = None
-    allows_file_mutation_continuation: bool = False
     grouped_tool_calls: list[GroupedToolCall] | None = None
     tool_batch_items: list[ChatItem] | None = None
     always_show_tool_result: bool = False
+    allows_tool_continuation: bool = False
     custom_type: str | None = None
     details: dict[str, JSONValue] | None = None
     system_prompt: bool = False
@@ -93,6 +105,8 @@ class TuiState:
     queued_steering: tuple[str, ...] = ()
     queued_follow_up: tuple[str, ...] = ()
     skills: tuple[Skill, ...] = ()
+    # Working directory used to shorten absolute read paths in the transcript.
+    cwd: Path | None = None
     custom_renderer: CustomMessageMarkup | None = None
     tool_call_renderer: ToolCallMarkup | None = None
     tool_result_renderer: ToolResultMarkup | None = None
@@ -115,6 +129,12 @@ class TuiState:
         compare=False,
     )
     _next_tool_batch_id: int = field(default=0, init=False, repr=False, compare=False)
+    _skill_names_by_path: tuple[tuple[Skill, ...], dict[Path, str]] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def add_item(
         self,
@@ -242,7 +262,7 @@ class TuiState:
         tool_call: ToolCall,
         *,
         batch_id: int | None = None,
-        allows_file_mutation_continuation: bool = False,
+        allows_tool_continuation: bool = False,
     ) -> ChatItem:
         """Append a tool call, batching adjacent calls for compact presentation."""
         skill_name = self._read_skill_name(tool_call)
@@ -253,11 +273,7 @@ class TuiState:
                 tool_call_id=tool_call.id,
             )
             return self.items[-1]
-        if self._can_append_file_mutation_continuation(
-            tool_call,
-            batch_id=batch_id,
-            allowed=allows_file_mutation_continuation,
-        ):
+        if self._can_continue_tool_run(tool_call, allowed=allows_tool_continuation):
             item = self.items[-1]
             item.tool_batch_id = batch_id
             self._append_batched_tool_call(item, tool_call)
@@ -269,7 +285,7 @@ class TuiState:
         item = self._new_tool_item(
             tool_call,
             batch_id=batch_id,
-            allows_file_mutation_continuation=allows_file_mutation_continuation,
+            allows_tool_continuation=allows_tool_continuation,
         )
         self.items.append(item)
         self._tool_items_by_call_id[tool_call.id] = item
@@ -280,48 +296,17 @@ class TuiState:
         tool_call: ToolCall,
         *,
         batch_id: int | None,
-        allows_file_mutation_continuation: bool = False,
+        allows_tool_continuation: bool = False,
     ) -> ChatItem:
         return ChatItem(
             role="tool",
-            text=format_tool_call_block(tool_call),
+            text=format_tool_call_block(tool_call, cwd=self.cwd),
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
             tool_arguments=tool_call.arguments,
             started_at=time.monotonic(),
+            allows_tool_continuation=allows_tool_continuation,
             tool_batch_id=batch_id,
-            allows_file_mutation_continuation=allows_file_mutation_continuation,
-        )
-
-    def _can_append_file_mutation_continuation(
-        self,
-        tool_call: ToolCall,
-        *,
-        batch_id: int | None,
-        allowed: bool,
-    ) -> bool:
-        """Group completed edit/write-only continuations across response boundaries."""
-        if (
-            not allowed
-            or batch_id is None
-            or tool_call.name not in RESULTFUL_FILE_GROUP_NAMES
-            or not self.items
-        ):
-            return False
-        previous = self.items[-1]
-        if (
-            previous.role != "tool"
-            or not previous.allows_file_mutation_continuation
-            or previous.tool_name != tool_call.name
-            or previous.tool_batch_items is not None
-            or previous.tool_result_text is None
-        ):
-            return False
-        if self._has_custom_call_rendering(tool_call.name, tool_call.arguments):
-            return False
-        return not self._has_custom_call_rendering(
-            previous.tool_name,
-            previous.tool_arguments or {},
         )
 
     def _can_append_tool_batch(self, tool_call: ToolCall, *, batch_id: int | None) -> bool:
@@ -341,6 +326,54 @@ class TuiState:
             previous_row.tool_name,
             previous_row.tool_arguments or {},
         )
+
+    def _can_continue_tool_run(self, tool_call: ToolCall, *, allowed: bool) -> bool:
+        """Return whether a tool-only message extends the previous tool run.
+
+        A model that calls tools one per response produces one item per call,
+        which the transcript then spreads out into separate blocks. When the
+        message carries no visible prose or thinking to interleave, its call
+        joins the previous completed tool item instead, so a run reads as one
+        block without changing block ordering. This is also what carries
+        serialized edit and write continuations onto one file row.
+        """
+        if not allowed or not self.items or tool_call.name not in BATCHABLE_TOOL_NAMES:
+            return False
+        previous = self.items[-1]
+        if (
+            previous.role != "tool"
+            or not previous.allows_tool_continuation
+            or previous.always_show_tool_result
+        ):
+            return False
+        # Only a settled, successful row keeps the run alive: pending rows mean
+        # interleaved execution, and a failure deserves its own visible block.
+        if previous.tool_result_text is None or previous.tool_result_text.startswith("✗"):
+            return False
+        rows, tail_name, tail_arguments = self._tool_run_tail(previous)
+        if rows >= TOOL_RUN_ROW_LIMIT or tail_name != tool_call.name:
+            return False
+        if self.resolve_tool_result(previous, expanded=False) is not None:
+            return False
+        if self._has_custom_call_rendering(tool_call.name, tool_call.arguments):
+            return False
+        return not self._has_custom_call_rendering(tail_name or "", tail_arguments)
+
+    def _tool_run_tail(self, item: ChatItem) -> tuple[int, str | None, dict[str, JSONValue]]:
+        """Return an item's visible row count and its last row's identity.
+
+        Grouped file runs keep their members in ``grouped_tool_calls`` rather
+        than ``tool_batch_items``, so the row count has to look at both: a
+        group is one collapsed row but still consumes the run's row budget.
+        """
+        if item.grouped_tool_calls:
+            member = item.grouped_tool_calls[-1]
+            return len(item.grouped_tool_calls), member.tool_name, member.tool_arguments
+        if item.tool_batch_items:
+            runs = [self._tool_run_tail(row) for row in item.tool_batch_items]
+            _, tail_name, tail_arguments = runs[-1]
+            return sum(count for count, _, _ in runs), tail_name, tail_arguments
+        return 1, item.tool_name, item.tool_arguments or {}
 
     def _has_custom_call_rendering(
         self,
@@ -371,7 +404,6 @@ class TuiState:
                 tool_arguments=item.tool_arguments,
                 started_at=item.started_at,
                 tool_batch_id=item.tool_batch_id,
-                allows_file_mutation_continuation=item.allows_file_mutation_continuation,
                 grouped_tool_calls=item.grouped_tool_calls,
             )
             item.tool_batch_items = [first]
@@ -406,7 +438,8 @@ class TuiState:
                         id=item.tool_call_id or "display-call",
                         name=item.tool_name or "read",
                         arguments=item.tool_arguments or {},
-                    )
+                    ),
+                    cwd=self.cwd,
                 ),
                 tool_result_text=item.tool_result_text,
                 tool_result=item.tool_result,
@@ -419,7 +452,7 @@ class TuiState:
             tool_call_id=tool_call.id,
             tool_name=tool_call.name,
             tool_arguments=tool_call.arguments,
-            text=format_tool_call_block(tool_call),
+            text=format_tool_call_block(tool_call, cwd=self.cwd),
             started_at=time.monotonic(),
         )
         item.grouped_tool_calls.append(member)
@@ -453,13 +486,17 @@ class TuiState:
             for member in completed
             if member.tool_result_text is not None and member.tool_result_text.startswith("✗")
         ]
-        paths = [
-            _string_argument(member.tool_arguments, "path") or "[unknown path]"
-            for member in members
-        ]
+        action = item.tool_name if item.tool_name in GROUPABLE_FILE_TOOL_NAMES else "read"
+        paths = []
+        for member in members:
+            path = _string_argument(member.tool_arguments, "path") or "[unknown path]"
+            if action in {"read", "edit"}:
+                path = _display_tool_path(path, self.cwd)
+            if action == "read" and path != "[unknown path]":
+                path = f"{path}{_read_line_suffix(member.tool_arguments)}"
+            paths.append(path)
         path_list = "\n".join(f"  - {path}" for path in paths)
         all_complete = len(completed) == len(members)
-        action = item.tool_name if item.tool_name in GROUPABLE_FILE_TOOL_NAMES else "read"
         running_verb = {"edit": "Editing", "read": "Reading", "write": "Writing"}[action]
         completed_verb = {"edit": "Edited", "read": "Read", "write": "Written"}[action]
         if not all_complete:
@@ -676,19 +713,19 @@ class TuiState:
     ) -> None:
         """Project canonical assistant blocks into display state in order."""
         batch_id = self.new_tool_batch_id() if include_tool_calls and message.tool_calls else None
-        allows_mutation_continuation = _is_file_mutation_only_message(message)
+        allows_tool_continuation = _is_tool_only_message(message)
         for block in message.content:
             if isinstance(block, ThinkingContent):
-                if block.thinking:
+                if assistant_block_is_visible(block):
                     self.add_item("thinking", block.thinking)
             elif isinstance(block, TextContent):
-                if block.text:
+                if assistant_block_is_visible(block):
                     self.add_item("assistant", block.text)
             elif include_tool_calls:
                 self.add_tool_call(
                     block,
                     batch_id=batch_id,
-                    allows_file_mutation_continuation=allows_mutation_continuation,
+                    allows_tool_continuation=allows_tool_continuation,
                 )
 
     def add_assistant_error(self, message: AssistantMessage) -> None:
@@ -704,22 +741,62 @@ class TuiState:
         path = _string_argument(tool_call.arguments, "path")
         if path is None:
             return None
-        read_path = _normalized_path(path)
+        return self._skill_names_by_resolved_path().get(_normalized_path(path))
+
+    def _skill_names_by_resolved_path(self) -> dict[Path, str]:
+        # Restoring a long session classifies every read call; resolving each
+        # skill path per call made that quadratic in filesystem lookups.
+        cached = self._skill_names_by_path
+        if cached is not None and cached[0] is self.skills:
+            return cached[1]
+        names: dict[Path, str] = {}
         for skill in self.skills:
-            if _normalized_path(skill.path) == read_path:
-                return skill.name
-        return None
+            names.setdefault(_normalized_path(skill.path), skill.name)
+        self._skill_names_by_path = (self.skills, names)
+        return names
 
 
-def _is_file_mutation_only_message(message: AssistantMessage) -> bool:
-    calls = [block for block in message.content if isinstance(block, ToolCall)]
-    return (
-        bool(calls)
-        and len(calls) == len(message.content)
-        and all(
-            call.name == calls[0].name and call.name in RESULTFUL_FILE_GROUP_NAMES for call in calls
-        )
-    )
+def has_visible_assistant_text(text: str) -> bool:
+    """Return whether assistant text renders transcript content.
+
+    Providers routinely emit whitespace-only text blocks (a bare ``"\\n\\n"``)
+    around tool calls, and some emit whitespace-only thinking blocks with them.
+    Projecting one as an item creates a zero-height row that still contributes
+    its block margins, doubling the gap between adjacent tool rows.
+    """
+    return bool(text.strip())
+
+
+def assistant_block_is_visible(block: TextContent | ThinkingContent) -> bool:
+    """Return whether an assistant content block renders transcript content.
+
+    Single predicate for both content types, shared by display projection, the
+    streaming canonical-block filter, and tool-run classification so they cannot
+    disagree about which blocks exist.
+    """
+    text = block.text if isinstance(block, TextContent) else block.thinking
+    return has_visible_assistant_text(text)
+
+
+def _is_tool_only_message(message: AssistantMessage) -> bool:
+    """Return whether a message holds tool calls and no visible prose/thinking.
+
+    Such a message contributes nothing between two tool runs, so its calls may
+    join the previous run. Any block the transcript would render (prose, or
+    thinking when the user expands it) ends the run, because block order is
+    preserved exactly as persisted.
+    """
+    if not message.tool_calls:
+        return False
+    for block in message.content:
+        if isinstance(block, ToolCall):
+            continue
+        if isinstance(block, TextContent | ThinkingContent) and not assistant_block_is_visible(
+            block
+        ):
+            continue
+        return False
+    return True
 
 
 def _parse_branch_summary_message(content: str) -> str | None:
@@ -751,27 +828,31 @@ def format_elapsed(seconds: float) -> str:
     return f"{hours}h {minutes}m"
 
 
-def format_tool_call_block(tool_call: ToolCall, *, compact: bool = True) -> str:
+def format_tool_call_block(
+    tool_call: ToolCall, *, compact: bool = True, cwd: Path | None = None
+) -> str:
     """Format a tool call, optionally compacting long bash invocations."""
-    invocation = format_tool_call_invocation(tool_call, expanded=not compact)
+    invocation = format_tool_call_invocation(tool_call, expanded=not compact, cwd=cwd)
     if tool_call.name == "bash":
         return invocation
     return f"→ {invocation}"
 
 
-def format_tool_call_invocation(tool_call: ToolCall, *, expanded: bool = False) -> str:
+def format_tool_call_invocation(
+    tool_call: ToolCall, *, expanded: bool = False, cwd: Path | None = None
+) -> str:
     """Format a tool call as a terse human-readable invocation."""
     arguments = tool_call.arguments
     if tool_call.name == "read":
         path = _string_argument(arguments, "path")
         if path is None:
             return _fallback_tool_call_invocation(tool_call)
-        return f"read {path}{_read_line_suffix(arguments)}"
+        return f"read {_display_tool_path(path, cwd)}{_read_line_suffix(arguments)}"
     if tool_call.name == "edit":
         path = _string_argument(arguments, "path")
         if path is None:
             return _fallback_tool_call_invocation(tool_call)
-        return f"edit {path}"
+        return f"edit {_display_tool_path(path, cwd)}"
     if tool_call.name == "write":
         path = _string_argument(arguments, "path")
         if path is None:
@@ -835,6 +916,29 @@ def _string_argument(arguments: dict[str, JSONValue], key: str) -> str | None:
 
 def _normalized_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve(strict=False)
+
+
+def _display_tool_path(path: str, cwd: Path | None) -> str:
+    """Shorten an absolute file path to a cwd-relative one when it is inside cwd.
+
+    Relative paths and paths outside ``cwd`` are returned unchanged so the
+    transcript never renders a misleading ``../..`` chain.
+    """
+    if cwd is None:
+        return path
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        return path
+    try:
+        return str(candidate.resolve().relative_to(_resolved_cwd(cwd)))
+    except (OSError, ValueError):
+        return path
+
+
+@lru_cache(maxsize=8)
+def _resolved_cwd(cwd: Path) -> Path:
+    """Resolve a working directory once per distinct value (restores call hot)."""
+    return cwd.expanduser().resolve()
 
 
 def _int_argument(arguments: dict[str, JSONValue], key: str) -> int | None:
