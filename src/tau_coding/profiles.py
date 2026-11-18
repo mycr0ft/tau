@@ -99,6 +99,20 @@ class ToolPolicy:
         return ToolPolicy(allow=tuple(allow), deny=tuple(deny))
 
 
+def _optional_positive_int(
+    data: dict[str, object], key: str, name: str, purpose: str
+) -> int | None:
+    """Read an optional positive integer profile key, or ``None`` when absent."""
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ProfileError(f"Profile {name!r} {key} must be an integer ({purpose})")
+    if value <= 0:
+        raise ProfileError(f"Profile {name!r} {key} must be positive ({purpose})")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Profile:
     """A validated profile manifest plus its directory."""
@@ -112,6 +126,8 @@ class Profile:
     tool_approval_jail: PathJail | None = None
     tool_approval_enforce: bool = False
     auto_compact_enabled: bool | None = None
+    auto_compact_token_threshold: int | None = None
+    auto_compact_keep_recent_tokens: int | None = None
 
     @property
     def system_prompt_path(self) -> Path:
@@ -206,6 +222,15 @@ class ProfileStore:
         auto_compact = data.get("auto_compact_enabled")
         if auto_compact is not None and not isinstance(auto_compact, bool):
             raise ProfileError(f"Profile {name!r} auto_compact_enabled must be a boolean")
+        compact_threshold = _optional_positive_int(
+            data,
+            "auto_compact_token_threshold",
+            name,
+            "automatically compact above this token estimate",
+        )
+        compact_keep_recent = _optional_positive_int(
+            data, "auto_compact_keep_recent_tokens", name, "raw history to keep after a compaction"
+        )
         tools = ToolPolicy.from_json(data.get("tools"))
         approval_data = data.get("toolApproval")
         jail_data = approval_data.get("jail") if isinstance(approval_data, dict) else None
@@ -231,6 +256,8 @@ class ProfileStore:
             tool_approval_jail=jail if jail.active else None,
             tool_approval_enforce=enforce,
             auto_compact_enabled=auto_compact,
+            auto_compact_token_threshold=compact_threshold,
+            auto_compact_keep_recent_tokens=compact_keep_recent,
         )
 
     def create(self, name: str, **values: Any) -> Profile:
@@ -240,7 +267,14 @@ class ProfileStore:
         if directory.exists():
             raise ProfileError(f"Profile already exists: {name}")
         manifest_data = {"version": 1, "name": name}
-        for key in ("provider", "model", "thinking_level", "auto_compact_enabled"):
+        for key in (
+            "provider",
+            "model",
+            "thinking_level",
+            "auto_compact_enabled",
+            "auto_compact_token_threshold",
+            "auto_compact_keep_recent_tokens",
+        ):
             if key in values and values[key] is not None:
                 manifest_data[key] = values[key]
         if "tools" in values and values["tools"] is not None:

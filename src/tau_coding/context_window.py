@@ -21,6 +21,23 @@ SUMMARY_MESSAGE_CHAR_LIMIT = 500
 DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000
 DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384
 DEFAULT_COMPACTION_KEEP_RECENT_TOKENS = 20_000
+
+#: Fraction of the advertised window at which auto-compaction should fire.  The
+#: summarisation call re-sends the whole history, so the reserve has to hold a second
+#: full pass plus the next turn's tool output; at 0.6 a single large tool result does
+#: not carry the session over between checks.
+DEFAULT_COMPACTION_THRESHOLD_RATIO = 0.6
+#: Absolute ceiling on the auto-compaction threshold.  Quality, latency and cost all
+#: fall away with context long before the window ends, so a large window (200k, 1M)
+#: must not push the threshold with it.
+DEFAULT_COMPACTION_THRESHOLD_CAP = 120_000
+#: Below this the session would summarise every turn or two and lose detail each time.
+DEFAULT_COMPACTION_THRESHOLD_FLOOR = 8_000
+#: Share of the threshold kept verbatim after a compaction, bounded so that a small
+#: threshold does not retain almost as much as it removes.
+DEFAULT_COMPACTION_KEEP_RECENT_RATIO = 1 / 3
+DEFAULT_COMPACTION_KEEP_RECENT_FLOOR = 4_000
+DEFAULT_COMPACTION_KEEP_RECENT_CAP = 20_000
 COMPACTION_SUMMARY_PREFIX = "Previous conversation summary:\n"
 
 SUMMARIZATION_SYSTEM_PROMPT = (
@@ -175,6 +192,40 @@ def auto_compaction_threshold_for_context_window(context_window_tokens: int) -> 
     if context_window_tokens <= 0:
         return None
     return max(1, context_window_tokens - DEFAULT_COMPACTION_RESERVE_TOKENS)
+
+
+def default_auto_compact_threshold(context_window_tokens: int) -> int | None:
+    """Return the default auto-compaction threshold for a context window.
+
+    ``window - 16k`` (see :func:`auto_compaction_threshold_for_context_window`) scales the
+    threshold with the *advertised* window, so a 1M-token model never compacts until it
+    errors.  This default tracks usable context instead: 60% of the window, capped at
+    120k so a large window does not buy slower, vaguer turns, floored at 8k so a small
+    one does not re-summarise every turn, and never so high that the summarisation
+    reserve is eaten.
+    """
+    if context_window_tokens <= 0:
+        return None
+    usable = int(context_window_tokens * DEFAULT_COMPACTION_THRESHOLD_RATIO)
+    threshold = min(usable, DEFAULT_COMPACTION_THRESHOLD_CAP)
+    threshold = max(threshold, DEFAULT_COMPACTION_THRESHOLD_FLOOR)
+    ceiling = context_window_tokens - DEFAULT_COMPACTION_RESERVE_TOKENS
+    if ceiling < 1:
+        return max(1, min(threshold, context_window_tokens // 2))
+    return min(threshold, ceiling)
+
+
+def default_compaction_keep_recent_tokens(threshold_tokens: int) -> int:
+    """Return how much raw history to keep after a compaction at *threshold_tokens*.
+
+    A fixed 20k retention under a 24k threshold would leave only 4k of new work before
+    the next compaction, so retention is a share of the threshold, bounded at both ends.
+    """
+    if threshold_tokens <= 0:
+        return DEFAULT_COMPACTION_KEEP_RECENT_FLOOR
+    keep = int(threshold_tokens * DEFAULT_COMPACTION_KEEP_RECENT_RATIO)
+    keep = max(keep, DEFAULT_COMPACTION_KEEP_RECENT_FLOOR)
+    return min(keep, DEFAULT_COMPACTION_KEEP_RECENT_CAP)
 
 
 def provider_context_tokens(message: AssistantMessage) -> int:

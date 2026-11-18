@@ -61,6 +61,7 @@ from tau_coding.context_window import (
     ContextUsageEstimate,
     auto_compaction_threshold_for_context_window,
     build_compaction_summary_prompt,
+    default_compaction_keep_recent_tokens,
     estimate_context_usage,
     estimate_message_tokens,
     summarize_messages_for_compaction,
@@ -413,6 +414,7 @@ class CodingSessionConfig:
     dynamic_provider: DynamicProvider | None = None
     owns_initial_provider: bool = False
     auto_compact_token_threshold: int | None = None
+    auto_compact_keep_recent_tokens: int | None = None
     auto_compact_enabled: bool = True
     thinking_level: ThinkingLevel = DEFAULT_THINKING_LEVEL
     thinking_level_override: ThinkingLevel | None = None
@@ -526,6 +528,7 @@ class CodingSession:
         self._runtime_provider_config = config.runtime_provider_config
         self._resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
         self._auto_compact_token_threshold = config.auto_compact_token_threshold
+        self._auto_compact_keep_recent_tokens = config.auto_compact_keep_recent_tokens
         self._auto_compact_enabled = config.auto_compact_enabled
         self._preview_model: ModelChoice | None = None
         self._preview_thinking: ThinkingLevel | None = None
@@ -1376,6 +1379,22 @@ class CodingSession:
             if limits is not None:
                 return limits.effective_auto_compact_token_limit
         return auto_compaction_threshold_for_context_window(self.context_window_tokens)
+
+    @property
+    def auto_compact_keep_recent_tokens(self) -> int:
+        """Return how much raw history survives a compaction.
+
+        Precedence: an explicit profile/config value, then a value derived from an
+        explicitly configured threshold, then the module default.  The threshold has to
+        be *configured* rather than merely computed, because deriving from the computed
+        one would silently ignore ``DEFAULT_COMPACTION_KEEP_RECENT_TOKENS`` — which is
+        supported (and monkeypatched by tests) as the unconfigured behaviour.
+        """
+        if self._auto_compact_keep_recent_tokens is not None:
+            return self._auto_compact_keep_recent_tokens
+        if self._auto_compact_token_threshold is not None:
+            return default_compaction_keep_recent_tokens(self._auto_compact_token_threshold)
+        return DEFAULT_COMPACTION_KEEP_RECENT_TOKENS
 
     def set_auto_compaction_enabled(self, enabled: bool) -> None:
         """Enable or disable automatic compaction for future turns."""
@@ -3107,6 +3126,7 @@ class CodingSession:
                 provider_settings=self._durable_provider_settings,
                 runtime_provider_config=runtime_provider_config,
                 auto_compact_token_threshold=self._auto_compact_token_threshold,
+                auto_compact_keep_recent_tokens=self._auto_compact_keep_recent_tokens,
                 auto_compact_enabled=self._auto_compact_enabled,
                 thinking_level=self._thinking_level,
                 shell_command_prefix=self._config.shell_command_prefix,
@@ -3356,6 +3376,7 @@ class CodingSession:
         self._runtime_provider_config = replacement._runtime_provider_config
         self._resource_paths = replacement._resource_paths
         self._auto_compact_token_threshold = replacement._auto_compact_token_threshold
+        self._auto_compact_keep_recent_tokens = replacement._auto_compact_keep_recent_tokens
         self._auto_compact_enabled = replacement._auto_compact_enabled
         self._thinking_level = replacement._thinking_level
         self._pending_initial_entries = replacement._pending_initial_entries
@@ -4383,7 +4404,7 @@ class CodingSession:
 
         first_kept_index = _first_recent_context_index(
             rows,
-            keep_recent_tokens=DEFAULT_COMPACTION_KEEP_RECENT_TOKENS,
+            keep_recent_tokens=self.auto_compact_keep_recent_tokens,
         )
         if first_kept_index <= 0:
             return None

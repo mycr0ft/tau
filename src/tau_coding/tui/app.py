@@ -8193,6 +8193,32 @@ class TauTuiApp(App[None]):
         self._apply_activity_indicator()
 
 
+def _profile_auto_compact_threshold(profile_root: Path | None) -> int | None:
+    """Return the active profile's compaction threshold, if it declares one.
+
+    Profiles carry their own threshold so a local model (whose usable context is a
+    fraction of its advertised window) and a frontier model can differ without the
+    operator remembering a flag at every launch. An explicit ``--auto-compact-threshold``
+    still wins at the call site.
+    """
+    if profile_root is None:
+        return None
+    try:
+        return ProfileStore().get(profile_root.name).auto_compact_token_threshold
+    except Exception:  # noqa: BLE001 - profile is advisory
+        return None
+
+
+def _profile_auto_compact_keep_recent(profile_root: Path | None) -> int | None:
+    """Return how much raw history the active profile keeps after a compaction."""
+    if profile_root is None:
+        return None
+    try:
+        return ProfileStore().get(profile_root.name).auto_compact_keep_recent_tokens
+    except Exception:  # noqa: BLE001 - profile is advisory
+        return None
+
+
 def _activity_prompt_border_color(
     theme: TuiTheme,
     *,
@@ -9340,7 +9366,12 @@ async def run_tui_app(
                 session_provider_name=record.provider_name,
                 provider_settings=provider_settings,
                 runtime_provider_config=runtime_provider_config,
-                auto_compact_token_threshold=auto_compact_token_threshold,
+                auto_compact_token_threshold=(
+                    auto_compact_token_threshold
+                    if auto_compact_token_threshold is not None
+                    else _profile_auto_compact_threshold(profile_root)
+                ),
+                auto_compact_keep_recent_tokens=_profile_auto_compact_keep_recent(profile_root),
                 index_on_first_persist=index_on_first_persist,
                 shell_command_prefix=shell_settings.shell_command_prefix,
                 extension_paths=extension_paths,
